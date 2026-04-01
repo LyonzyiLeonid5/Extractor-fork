@@ -13,7 +13,6 @@ namespace Extractor
 {
     class Program
     {
-        private const string Version = "2026-03-17";
         private static bool launchedByExplorer = false;
         private static Options opt;
 
@@ -50,7 +49,7 @@ namespace Extractor
 
         private static void PrintUsage()
         {
-            Console.WriteLine($"Extractor {Version}\n");
+            Console.WriteLine($"Extractor {TextUtils.GetVersionString()}\n");
             Console.WriteLine("Usage:\n  extractor path... [options]\n");
             Console.WriteLine("Options:");
             opt.OptionSet.WriteOptionDescriptions(Console.Out);
