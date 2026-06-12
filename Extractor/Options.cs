@@ -168,7 +168,15 @@ namespace Extractor
                 { "log:",
                     "Enables logging. If no path is provided, the log will be written to " +
                     $"\"{LogFile}\".",
-                    x => { Logging = true; LogFile = x; } },
+                    x => 
+                    { 
+                        Logging = true; 
+                        if (!string.IsNullOrWhiteSpace(x)) 
+                        { 
+                            LogFile = x; 
+                        } 
+                    } 
+                },
                 { "p=|partial=",
                     "Limits extraction to the comma-separated list of files and/or " +
                     "directories specified, e.g.:\n" +
