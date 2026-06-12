@@ -204,18 +204,15 @@ namespace Extractor.Deep
         /// <returns>Discovered paths.</returns>
         private PotentialPaths FindPathsInMat(byte[] fileBuffer, string filePath)
         {
+            // Purposefully mislabeled .sii file?
+            if (fileBuffer.Length > 8 && fileBuffer.AsSpan(0, 8).SequenceEqual("SiiNunit"u8))
+            {
+                return FindPathsInSii(fileBuffer, filePath);
+            }
+
             PotentialPaths potentialPaths = [];
 
-            MatFile mat;
-            try
-            {
-                mat = MatFile.Load(Encoding.UTF8.GetString(fileBuffer));
-            }
-            catch (Exception)
-            {
-                //Debugger.Break();
-                throw;
-            }
+            var mat = MatFile.Load(Encoding.UTF8.GetString(fileBuffer));
 
             foreach (var texture in mat.Textures)
             {
