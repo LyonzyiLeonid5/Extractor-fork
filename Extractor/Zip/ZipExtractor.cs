@@ -1,4 +1,5 @@
 ﻿using Extractor.Deep;
+using Serilog;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -48,8 +49,12 @@ namespace Extractor.Zip
         /// </summary>
         private int numFailed;
 
+        private readonly ILogger logger;
+
         public ZipExtractor(string scsPath, Options opt) : base(scsPath, opt)
         {
+            logger = Log.ForContext<ZipExtractor>();
+
             Reader = ZipReader.Open(scsPath);
             PrintContentSummary();
         }
@@ -59,15 +64,15 @@ namespace Extractor.Zip
         {
             var entriesToExtract = GetEntriesToExtract(Reader, opt.StartPaths, opt.Filters);
             substitutions = DeterminePathSubstitutions(entriesToExtract);
+            LogPathSubstitutions();
 
-            var scsName = Path.GetFileName(ScsPath);
             foreach (var entry in entriesToExtract)
             {
                 try
                 {
                     if (!opt.Quiet)
                     {
-                        PrintExtractionMessage(entry.FileName, scsName);
+                        PrintExtractionMessage(entry.FileName, ScsName);
                     }
                     if (!substitutions.TryGetValue(entry.FileName, out string fileName))
                     {
@@ -77,14 +82,26 @@ namespace Extractor.Zip
                 }
                 catch (Exception ex)
                 {
-                    Console.Error.WriteLine($"Unable to extract {ReplaceControlChars(entry.FileName)}:");
+                    var fileName = ReplaceControlChars(entry.FileName);
+                    Console.Error.WriteLine($"Unable to extract {fileName}:");
                     Console.Error.WriteLine(ex.Message);
+                    logger.Error(ex, "[{ScsName}] Unable to extract {FileName}", ScsName, fileName);
                     numFailed++;
                 }
             }
 
             WriteRenamedSummary(outputRoot);
             WriteModifiedSummary(outputRoot);
+        }
+
+        private void LogPathSubstitutions()
+        {
+            logger.Information("[{ScsName}] {NumSubstitutions} paths will be renamed", ScsName, substitutions.Count);
+            foreach (var (archivePath, sanitizedPath) in substitutions)
+            {
+                logger.Verbose("[{ScsName}] File \"{Path}\" will be renamed to \"{Sanitized}\"",
+                    ScsName, archivePath, sanitizedPath);
+            }
         }
 
         internal static Dictionary<string, string> DeterminePathSubstitutions(
@@ -172,6 +189,7 @@ namespace Extractor.Zip
         {
             Console.Error.WriteLine($"Opened {Path.GetFileName(ScsPath)}: " +
                 $"ZIP archive; {Reader.Entries.Count} entries");
+            logger.Information("[{ScsName}] ZIP; {NumEntries} entries", ScsName, Reader.Entries.Count);
         }
 
         public override void PrintExtractionResult()
@@ -179,6 +197,11 @@ namespace Extractor.Zip
             Console.Error.WriteLine($"{numExtracted} extracted " +
                 $"({renamedFiles.Count} renamed, {modifiedFiles.Count} modified), " +
                 $"{numSkipped} skipped, {numFailed} failed");
+            logger.Information("[{ScsName}] {NumExtracted} extracted " +
+                "({NumRenamed} renamed, {NumModified} modified), " +
+                "{NumSkipped} skipped, {NumFailed} failed",
+                ScsName, numExtracted, renamedFiles.Count, modifiedFiles.Count, 
+                numSkipped, numFailed);
             PrintRenameSummary(renamedFiles.Count, modifiedFiles.Count);
         }
 

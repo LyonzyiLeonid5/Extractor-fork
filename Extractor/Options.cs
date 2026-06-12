@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using static Extractor.PathUtils;
 using Extractor.Deep;
 using Microsoft.Extensions.FileSystemGlobbing;
+using Serilog;
 
 namespace Extractor
 {
@@ -70,6 +71,16 @@ namespace Extractor
         /// Instead of extracting, list all paths contained in the archive.
         /// </summary>
         public bool ListPaths { get; set; } = false;
+
+        /// <summary>
+        /// The path the log file will be written to.
+        /// </summary>
+        public string LogFile { get; set; } = "./_extraction.log";
+
+        /// <summary>
+        /// Whether a log file is written.
+        /// </summary>
+        public bool Logging { get; set; } = false;
 
         /// <summary>
         /// Instead of extracting, print the program's version and usage information.
@@ -135,7 +146,7 @@ namespace Extractor
                     $"to extract archives without a top level directory listing.",
                     x => { UseDeepExtractor = true; } },
                 { "d=|dest=",
-                    $"The output directory.\nDefault: {Destination}",
+                    $"The output directory.\nDefault: \"{Destination}\"",
                     x => { Destination = x; } },
                  { "dry-run",
                     $"Don't write anything to disk.",
@@ -154,6 +165,10 @@ namespace Extractor
                 { "list-entries",
                     "[HashFS] Lists entries contained in the archive.",
                     x => { ListEntries = true; } },
+                { "log:",
+                    "Enables logging. If no path is provided, the log will be written to " +
+                    $"\"{LogFile}\".",
+                    x => { Logging = true; LogFile = x; } },
                 { "p=|partial=",
                     "Limits extraction to the comma-separated list of files and/or " +
                     "directories specified, e.g.:\n" +

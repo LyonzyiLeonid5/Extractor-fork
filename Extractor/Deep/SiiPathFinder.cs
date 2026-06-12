@@ -1,4 +1,5 @@
-﻿using Sprache;
+﻿using Serilog;
+using Sprache;
 using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
@@ -60,6 +61,13 @@ namespace Extractor.Deep
         [GeneratedRegex(@"(?:src|face)=(\S*)")]
         private static partial Regex uiHtmlPathRegex();
 
+        private readonly ILogger logger;
+
+        public SiiPathFinder()
+        {
+            logger = Log.ForContext<SiiPathFinder>();
+        }
+
         /// <summary>
         /// Returns paths referenced in the given SII file.
         /// If the file fails to parse, an empty set is returned.
@@ -68,7 +76,7 @@ namespace Extractor.Deep
         /// <param name="filePath">The path of the file in the archive.</param>
         /// <param name="fs">The archive which is being read from as <see cref="IFileSystem"/>.</param>
         /// <returns>Paths referenced in the file.</returns>
-        public static (PotentialPaths Paths, HashSet<string> ConsumedSuis) FindPathsInSii(
+        public (PotentialPaths Paths, HashSet<string> ConsumedSuis) FindPathsInSii(
             byte[] fileBuffer, string filePath, IFileSystem fs)
         {
             var magic = Encoding.UTF8.GetString(fileBuffer[0..4]);
@@ -79,8 +87,9 @@ namespace Extractor.Deep
                 ))
             {
                 #if DEBUG
-                Console.Error.WriteLine($"Not a sii file: {filePath}");
+                    Console.Error.WriteLine($"Not a SII file: {filePath}");
                 #endif
+                logger.Error("File \"{FilePath}\" is not a SII file", filePath);
                 return ([], []);
             }
 
@@ -92,38 +101,32 @@ namespace Extractor.Deep
                 var suis = sii.Includes.ToHashSet();
                 return (paths, suis);
             }
-            catch (ParseException)
+            catch (ParseException pex)
             {
                 if (!filePath.StartsWith("/ui/template"))
                     Debugger.Break();
+                logger.Error(pex, "Unable to parse \"{FilePath}\"", filePath);
                 throw;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                logger.Error(ex, "Unable to parse \"{FilePath}\"", filePath);
                 Debugger.Break();
                 throw;
             }
         }
 
-        public static (PotentialPaths Paths, HashSet<string> ConsumedSuis) FindPathsInSii(
+        public (PotentialPaths Paths, HashSet<string> ConsumedSuis) FindPathsInSii(
             string siiStr, string filePath, IFileSystem fs)
         {
             var siiDirectory = GetParent(filePath);
-            try
-            {
-                var sii = SiiFile.Load(siiStr, siiDirectory, fs, true);
-                var paths = FindPathsInSii(sii, fs);
-                var suis = sii.Includes.ToHashSet();
-                return (paths, suis);
-            }
-            catch (Exception)
-            {
-                Debugger.Break();
-                throw;
-            }
+            var sii = SiiFile.Load(siiStr, siiDirectory, fs, true);
+            var paths = FindPathsInSii(sii, fs);
+            var suis = sii.Includes.ToHashSet();
+            return (paths, suis);
         }
 
-        private static PotentialPaths FindPathsInSii(SiiFile sii, IFileSystem fs)
+        private PotentialPaths FindPathsInSii(SiiFile sii, IFileSystem fs)
         {
             PotentialPaths potentialPaths = [];
 
@@ -183,22 +186,25 @@ namespace Extractor.Deep
             }
         }
 
-        private static void ConstructLicensePlateMatPaths(string country, PotentialPaths potentialPaths,
+        private void ConstructLicensePlateMatPaths(string country, PotentialPaths potentialPaths,
             IFileSystem fs)
         {
             potentialPaths.Add($"/material/ui/lp/{country}/trailer.mat", null);
 
             var licensePlateSiiPath = $"/def/country/{country}/license_plates.sii";
             if (!fs.FileExists(licensePlateSiiPath))
+            {
                 return;
+            }
 
             try
             {
                 var licensePlates = SiiFile.Open(licensePlateSiiPath, fs);
                 ConstructLicensePlateMatPaths(country, potentialPaths, licensePlates);
             }
-            catch
+            catch (Exception ex)
             {
+                logger.Error(ex, "Unable to construct license plate .mat paths");
                 Debugger.Break();
             }
         }
@@ -206,7 +212,7 @@ namespace Extractor.Deep
         internal static void ConstructLicensePlateMatPaths(string country, PotentialPaths potentialPaths,
             SiiFile licensePlates)
         {
-            // See https://modding.scssoft.com/wiki/Games/ETS2/Modding_guides/1.36#Traffic_data.
+            // See https://modding.scssoft.com/wiki/Games/ETS2/Modding_guides/1.36#Traffic_data
 
             potentialPaths.Add($"/material/ui/lp/{country}/trailer.mat");
             potentialPaths.Add($"/material/ui/lp/{country}/truck_front.mat");
@@ -245,7 +251,7 @@ namespace Extractor.Deep
             }
         }
 
-        internal static void ProcessSiiUnitAttribute(string unitClass,
+        internal void ProcessSiiUnitAttribute(string unitClass,
             KeyValuePair<string, dynamic> attrib, PotentialPaths potentialPaths)
         {
             if (ignorableUnitClasses.Contains(unitClass))
@@ -264,7 +270,7 @@ namespace Extractor.Deep
             }
         }
 
-        private static void ProcessArrayAttribute(KeyValuePair<string, dynamic> attrib, string unitClass,
+        private void ProcessArrayAttribute(KeyValuePair<string, dynamic> attrib, string unitClass,
             PotentialPaths potentialPaths)
         {
             IList<dynamic> items = attrib.Value;
@@ -299,17 +305,27 @@ namespace Extractor.Deep
                     {
                         var parts = str.Split("|");
                         if (parts.Length == 2)
+                        {
                             potentialPaths.Add(parts[1], null);
+                        }
                         else
+                        {
+                            logger.Warning("{Key} key contains invalid or unsupported value \"{Value}\"", key, str);
                             Debugger.Break();
+                        }
                     }
                     else if (unitClass == "company_permanent" && key == "sound")
                     {
                         var parts = str.Split("|");
                         if (parts.Length == 2)
+                        {
                             potentialPaths.Add(parts[1], null);
+                        }
                         else
+                        {
+                            logger.Warning("{Key} key contains invalid or unsupported value \"{Value}\"", key, str);
                             Debugger.Break();
+                        }
                     }
                     else if (unitClass == "overlay_def")
                     {
@@ -381,7 +397,7 @@ namespace Extractor.Deep
             }
         }
 
-        public static void FindPathsInUnconsumedSuis(HashSet<string> consumedSuis,
+        public void FindPathsInUnconsumedSuis(HashSet<string> consumedSuis,
             HashSet<string> everything, AssetLoader multiModWrapper)
         {
             var allSuis = everything.Where(p => p.EndsWith(".sui"));
@@ -390,7 +406,7 @@ namespace Extractor.Deep
             everything.UnionWith(paths);
         }
 
-        public static PotentialPaths FindPathsInUnconsumedSuis(IEnumerable<string> unconsumedSuis, IFileSystem fs)
+        public PotentialPaths FindPathsInUnconsumedSuis(IEnumerable<string> unconsumedSuis, IFileSystem fs)
         {
             PotentialPaths paths = [];
             foreach (var sui in unconsumedSuis)
@@ -417,9 +433,10 @@ namespace Extractor.Deep
                 catch (Exception ex)
                 {
                     #if DEBUG
-                    Console.WriteLine(ex.ToString());
-                    Debugger.Break();
+                        Console.WriteLine(ex.ToString());
+                        Debugger.Break();
                     #endif
+                    logger.Warning(ex, "Unable to parse unconsumed .sui file \"{Sui}\"", sui);
                 }
             }
             return paths;

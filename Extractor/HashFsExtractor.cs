@@ -1,11 +1,11 @@
-﻿using Sprache;
+﻿using Serilog;
+using Sprache;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
-using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using TruckLib;
@@ -78,14 +78,26 @@ namespace Extractor
         /// </summary>
         protected int numJunk;
 
+        private readonly ILogger logger;
+
         public HashFsExtractor(string scsPath, Options opt) : base(scsPath, opt)
         {
+            logger = Log.ForContext<HashFsExtractor>();
+
             PrintNotFoundMessage = !opt.ExtractAllInDir;
 
             Reader = HashFsReader.Open(scsPath, opt.ForceEntryTableAtEnd);
             PrintContentSummary();
+            
+            if (Reader is HashFsV2Reader v2 && v2.UnimplementedEntries.Count > 0)
+            {
+                Console.Error.WriteLine($"WARN: {v2.UnimplementedEntries.Count} entries with unknown chunk type " +
+                    $"have been skipped; some files may be missing");
+                logger.Warning("[{ScsName}] Skipped {Count} entries with unknown chunk type; some files may be missing",
+                    ScsName, v2.UnimplementedEntries.Count);
+            }
 
-            bool hasSaltChanged = false;
+            bool hasSaltChanged;
             if (opt.Salt is not null)
             {
                 Reader.Salt = opt.Salt.Value;
@@ -124,9 +136,13 @@ namespace Extractor
                             $"was not found");
                         numNotFound++;
                     }
+                    logger.Error("[{ScsName}] Path \"{Path}\" was not found", ScsName, nonexistent);
                 }
             );
+            logger.Information("[{ScsName}] Found {Num} paths to extract", ScsName, pathsToExtract.Count);
+
             substitutions = DeterminePathSubstitutions(pathsToExtract);
+            LogPathSubstitutions();
 
             ExtractFiles(pathsToExtract, outputRoot);
 
@@ -134,18 +150,30 @@ namespace Extractor
             WriteModifiedSummary(outputRoot);
         }
 
+        protected void LogPathSubstitutions()
+        {
+            logger.Information("[{ScsName}] {NumSubstitutions} paths will be renamed", ScsName, substitutions.Count);
+            foreach (var (archivePath, sanitizedPath) in substitutions)
+            {
+                logger.Verbose("[{ScsName}] File \"{Path}\" will be renamed to \"{Sanitized}\"",
+                    ScsName, archivePath, sanitizedPath);
+            }
+        }
+
         private void AssertRootNotMissingOrEmpty()
         {
-            if (Reader.EntryExists("/") == EntryType.Directory)
+            if (Reader.EntryExists("/") != EntryType.NotFound)
             {
                 var listing = Reader.GetDirectoryListing("/");
                 if (listing.Subdirectories.Count == 0 && listing.Files.Count == 0)
                 {
+                    logger.Error("[{ScsName}] Root directroy listing is empty; unable to proceed", ScsName);
                     throw new RootEmptyException();
                 }
             }
             else
             {
+                logger.Error("[{ScsName}] Root directroy listing is missing; unable to proceed", ScsName);
                 throw new RootMissingException();
             }
         }
@@ -197,9 +225,14 @@ namespace Extractor
             if (!Reader.FileExists(archivePath))
             {
                 if (ignoreMissing)
+                {
                     return;
+                }
                 else
+                {
+                    logger.Error("[{ScsName}] File \"{Path}\" was not found", ScsName, archivePath);
                     throw new FileNotFoundException();
+                }
             }
 
             if (!substitutions.TryGetValue(archivePath, out string filePath))
@@ -214,17 +247,18 @@ namespace Extractor
 
             if (!opt.Quiet)
             {
-                var scsName = Path.GetFileName(ScsPath);
-                PrintExtractionMessage(archivePath, scsName);
+                PrintExtractionMessage(archivePath, ScsName);
             }
 
-            if (!Overwrite && File.Exists(outputPath))
+            if (Overwrite || !File.Exists(outputPath))
+            {
+                logger.Verbose("[{ScsName}] Extracting \"{Path}\"", ScsName, archivePath);
+                ExtractToDisk(archivePath, outputPath);
+            }
+            else
             {
                 numSkipped++;
-                return;
             }
-
-            ExtractToDisk(archivePath, outputPath);
         }
 
         protected void ExtractToDisk(string archivePath, string outputPath)
@@ -240,6 +274,12 @@ namespace Extractor
                 var buffers = Reader.Extract(entry, archivePath);
 
                 var wasModified = PerformSubstitutionIfRequired(archivePath, ref buffers[0], substitutions);
+                if (wasModified)
+                {
+                    logger.Verbose("[{ScsName}] \"{Path}\" has been modified to update renamed paths",               
+                        ScsName, archivePath);
+                }
+
                 if (!opt.DryRun)
                 {
                     Directory.CreateDirectory(Path.GetDirectoryName(outputPath));
@@ -251,37 +291,41 @@ namespace Extractor
                     var ddsPath = Path.ChangeExtension(outputPath, "dds");
                     if (Overwrite || !File.Exists(ddsPath))
                     {
-                        try
-                        {
-                            File.WriteAllBytes(ddsPath, buffers[1]);
-                        }
-                        catch (IOException ioex)
-                        {
-                            PrintExtractionFailure(Path.ChangeExtension(archivePath, "dds"),
-                                ioex.Message);
-                        }
+                        File.WriteAllBytes(ddsPath, buffers[1]);
                     }
                 }
 
                 numExtracted++;
                 if (wasModified)
+                {
+                    // This is down here at the end so it only runs
+                    // if no IO errors occurred
                     modifiedFiles.Add(archivePath);
+                }
             }
             catch (InvalidDataException idex)
             {
                 PrintExtractionFailure(archivePath, idex.Message);
+                logger.Error(idex, "[{ScsName}] Unable to extract \"{Path}\" ({Hash:x16} at {Offset})", 
+                    ScsName, archivePath, entry.Hash, entry.Offset);
             }
             catch (AggregateException agex)
             {
                 PrintExtractionFailure(archivePath, agex.ToString());
+                logger.Error(agex, "[{ScsName}] Unable to extract \"{Path}\" ({Hash:x16} at {Offset})",
+                    ScsName, archivePath, entry.Hash, entry.Offset);
             }
             catch (IOException ioex)
             {
                 PrintExtractionFailure(archivePath, ioex.Message);
+                logger.Error(ioex, "[{ScsName}] Unable to extract \"{Path}\" ({Hash:x16} at {Offset})",
+                    ScsName, archivePath, entry.Hash, entry.Offset);
             }
             catch (Exception ex)
             {
                 PrintExtractionFailure(archivePath, ex.ToString());
+                logger.Error(ex, "[{ScsName}] Unable to extract \"{Path}\" ({Hash:x16} at {Offset})",
+                    ScsName, archivePath, entry.Hash, entry.Offset);
             }
         }
 
@@ -291,6 +335,7 @@ namespace Extractor
                 return;
 
             // Kick out entries with offsets greater than the size of the archive.
+            logger.Information("[{ScsName}] Eliminating entries with impossibly large offsets", ScsName);
             foreach (var (_, entry) in Reader.Entries)
             {
                 if (entry.Offset > (ulong)Reader.BaseReader.BaseStream.Length)
@@ -300,6 +345,7 @@ namespace Extractor
             }
 
             // Find all entries with duplicate offsets and group them by offset.
+            logger.Information("[{ScsName}] Cleaning up entries with duplicate offsets", ScsName);
             var visitedOffsets = new Dictionary<ulong, IEntry>();
             var junk = new Dictionary<ulong, List<IEntry>>();
             foreach (var (_, entry) in Reader.Entries)
@@ -390,14 +436,25 @@ namespace Extractor
 
             hasIdentifiedJunk = true;
 
+            if (junkEntries.Count > 0 || maybeJunkEntries.Count > 0)
+            {
+                logger.Information("[{ScsName}] Found {NumJunkEntries} confirmed junk entries " +
+                    "and {NumMaybeJunk} potential junk entries",
+                    ScsName, junkEntries.Count, maybeJunkEntries.Count);
+            }
+
             void MarkAsConfirmedJunk(IEntry entry)
             {
+                logger.Verbose("[{ScsName}] Identified {Hash:x16} ({Offset}) as junk", 
+                    ScsName, entry.Hash, entry.Offset);
                 junkEntries.Add(entry.Hash, entry);
                 numJunk++;
             }
 
             void MarkAsMaybeJunk(IEntry entry)
             {
+                logger.Verbose("[{ScsName}] Identified {Hash:x16} ({Offset}) as potential junk", 
+                    ScsName, entry.Hash, entry.Offset);
                 maybeJunkEntries.Add(entry.Hash, entry);
                 numJunk++;
             }
@@ -423,6 +480,9 @@ namespace Extractor
             {
                 // Otherwise, iterate all salts until we find the good one
                 Console.Error.WriteLine("Salt may be incorrect; attempting to fix ...");
+                logger.Warning("[{ScsName}] {TestedFile} exists but fails to decompress, " +
+                    "possibly indicating MG salt shenanigans. " +
+                    "Attempting to fix", ScsName, fileToTest);
                 for (int i = 0; i < ushort.MaxValue; i++)
                 {
                     Reader.Salt = (ushort)i;
@@ -432,12 +492,14 @@ namespace Extractor
                         {
                             Reader.Extract(fileToTest);
                             Console.Error.WriteLine($"Salt set to {i}");
+                            logger.Warning("[{ScsName}] Found working salt: {Salt}", ScsName, i);
                             return true;
                         }
                         catch { /* Failed to decompress => continue */ }
                     }
                 }
                 Console.Error.WriteLine("Unable to find true salt");
+                logger.Error("[{ScsName}] Unable to find true salt", ScsName);
             }
             return false;
         }
@@ -455,6 +517,8 @@ namespace Extractor
 
             if (Reader.Version != 1)
                 return;
+
+            logger.Information("[{ScsName}] Checking if any entry offsets were nudged by MG", ScsName);
 
             // The aforementioned "nudges" appear to always be one of these values:
             sbyte[] offsets = [-91, -75, -59, -43, -27, 37, 53, 69, 85, 101];
@@ -506,13 +570,16 @@ namespace Extractor
                 }
                 else
                 {
-                    // I guess there's just nothing then.
+                    logger.Debug("[{ScsName}] No zlib header found in target range for {Hash:x16}", ScsName, entry);
                 }
             }
 
             void SetCorrectedOffset(EntryV1 entry, long nudge)
             {
-                entry.Offset = (ulong)((long)entry.Offset + nudge);
+                var newOffset = (ulong)((long)entry.Offset + nudge);
+                logger.Debug("[{ScsName}] Corrected offset of {Hash:x16} from {Old} to {New}",
+                    ScsName, entry, entry.Offset, newOffset);
+                entry.Offset = newOffset;
                 Reader.Entries[entry.Hash] = entry;
             }
 
@@ -567,6 +634,9 @@ namespace Extractor
             Console.Error.WriteLine($"Opened {Path.GetFileName(ScsPath)}: " +
                 $"HashFS v{Reader.Version} archive; {Reader.Entries.Count} entries " +
                 $"({Reader.Entries.Count - dirCount} files, {dirCount} directory listings)");
+            logger.Information("[{ScsName}] HashFS v{HashFsVersion}; " +
+                "{EntryCount} entries ({FileCount} files, {DirCount} directory listings)",
+                ScsName, Reader.Version, Reader.Entries.Count, Reader.Entries.Count - dirCount, dirCount);
         }
 
         public override void PrintExtractionResult()
@@ -574,6 +644,11 @@ namespace Extractor
             Console.Error.WriteLine($"{numExtracted} extracted " +
                 $"({renamedFiles.Count} renamed, {modifiedFiles.Count} modified), " +
                 $"{numSkipped} skipped, {numNotFound} not found, {numJunk} junk, {numFailed} failed");
+            logger.Information("[{ScsName}] {NumExtracted} extracted " +
+                "({NumRenamed} renamed, {NumModified} modified), " +
+                "{NumSkipped} skipped, {NumNotFound} not found, {NumJunk} junk, {NumFailed} failed",
+                ScsName, numExtracted, renamedFiles.Count, modifiedFiles.Count, 
+                numSkipped, numNotFound, numJunk, numFailed);
             PrintRenameSummary(renamedFiles.Count, modifiedFiles.Count);
         }
 

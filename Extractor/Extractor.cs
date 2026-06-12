@@ -1,8 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Text;
-using System.Text.RegularExpressions;
 using TruckLib;
 using TruckLib.Sii;
 using static Extractor.PathSubstitution;
@@ -27,6 +25,11 @@ namespace Extractor
         public string ScsPath { get; init; }
 
         /// <summary>
+        /// The name of the archive file.
+        /// </summary>
+        public string ScsName { get; init; }
+
+        /// <summary>
         /// Files which were renamed because they contained invalid characters.
         /// </summary>
         protected List<(string ArchivePath, string SanitizedPath)> renamedFiles = [];
@@ -45,6 +48,7 @@ namespace Extractor
         public Extractor(string scsPath, Options opt) 
         { 
             ScsPath = scsPath;
+            ScsName = Path.GetFileName(scsPath);
             Overwrite = !opt.SkipIfExists;
             this.opt = opt;
         }

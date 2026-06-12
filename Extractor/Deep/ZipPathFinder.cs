@@ -1,4 +1,5 @@
 ﻿using Extractor.Zip;
+using Serilog;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -25,8 +26,13 @@ namespace Extractor.Deep
 
         public HashSet<string> ConsumedSuis { get; init; } = [];
 
+        private readonly ILogger logger;
+
+
         public ZipPathFinder(ZipReader reader) 
         {
+            logger = Log.ForContext<ZipPathFinder>();
+
             this.reader = reader;
         }
 
@@ -62,8 +68,9 @@ namespace Extractor.Deep
                     var paths = fpf.FindPathsInFile(buffer, path, fileType);
                     ReferencedFiles.UnionWith(paths);
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
+                    logger.Error(ex, "Analysis of file {FileName} failed", entry.FileName);
                     Debugger.Break();
                 }
             }

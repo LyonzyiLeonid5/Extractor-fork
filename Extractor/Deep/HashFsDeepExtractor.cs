@@ -1,15 +1,16 @@
-﻿using Sprache;
+﻿using Serilog;
+using Sprache;
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using System.Data;
 using TruckLib.HashFs;
-using static Extractor.PathUtils;
 using static Extractor.ConsoleUtils;
+using static Extractor.PathUtils;
 using static Extractor.TextUtils;
 
 namespace Extractor.Deep
@@ -41,8 +42,11 @@ namespace Extractor.Deep
 
         private bool hasSearchedForPaths;
 
+        private readonly ILogger logger;
+
         public HashFsDeepExtractor(string scsPath, Options opt) : base(scsPath, opt)
         {
+            logger = Log.ForContext<HashFsDeepExtractor>();
         }
 
         /// <inheritdoc/>
@@ -58,6 +62,7 @@ namespace Extractor.Deep
             bool startPathsSet = !opt.StartPaths.SequenceEqual(["/"]);
 
             substitutions = DeterminePathSubstitutions(foundFiles);
+            LogPathSubstitutions();
 
             // Extract regular files
             var filteredFoundFiles = foundFiles
@@ -69,6 +74,8 @@ namespace Extractor.Deep
                 })
                 .Order()
                 .ToArray();
+            logger.Information("[{ScsName}] Extracting {NumPaths} files with known paths", 
+                ScsName, filteredFoundFiles.Length);
             ExtractFiles(filteredFoundFiles, outputRoot, ignoreMissing);
 
             // Extract decoy files
@@ -81,6 +88,11 @@ namespace Extractor.Deep
                 })
                 .Order()
                 .ToArray();
+            if (foundDecoyFiles.Length > 0)
+            {
+                logger.Information("[{ScsName}] Extracting {NumDecoyPaths} decoy files", 
+                    ScsName, foundDecoyFiles.Length);
+            }
             var decoyDestination = Path.Combine(outputRoot, DecoyDirectory);
             foreach (var decoyFile in foundDecoyFiles)
             {
@@ -99,12 +111,15 @@ namespace Extractor.Deep
 
         public (HashSet<string> FoundFiles, HashSet<string> ReferencedFiles) FindPaths()
         {
+            logger.Information("[{ScsName}] Searching archive contents for paths", ScsName);
             if (!hasSearchedForPaths)
             {
                 finder = new HashFsPathFinder(Reader, opt.AdditionalStartPaths, junkEntries);
                 finder.Find();
                 hasSearchedForPaths = true;
             }
+            logger.Information("[{ScsName}] Found {NumFoundFiles} paths, {NumReferencedFiles} referenced paths", 
+                ScsName, finder.FoundFiles.Count, finder.ReferencedFiles.Count);
             return (finder.FoundFiles, finder.ReferencedFiles);
         }
 
@@ -133,21 +148,31 @@ namespace Extractor.Deep
                     }
                     junkEntries.TryGetValue(Reader.HashPath(f), out var retval);
                     return retval;
-                }));
+                }))
+                .Except(junkEntries.Values)
+                .Except(maybeJunkEntries.Values)
+                .ToArray();
 
+            if (notRecovered.Length == 0)
+            {
+                return;
+            }
+            
+            logger.Information("[{ScsName}] Dumping {NumUnrecovered} files with unknown paths", 
+                ScsName, notRecovered.Length);
             HashSet<ulong> visitedOffsets = [];
 
             var outputDir = Path.Combine(destination, DumpDirectory);
 
             foreach (var entry in notRecovered)
             {
-                if (junkEntries.ContainsKey(entry.Hash) ||
+                /*if (junkEntries.ContainsKey(entry.Hash) ||
                     maybeJunkEntries.ContainsKey(entry.Hash))
                 {
                     continue;
-                }
+                }*/
 
-                var offsetHexStr = entry.Hash.ToString("x16");
+                var hashHexStr = entry.Hash.ToString("x16");
 
                 byte[] fileBuffer;
                 try
@@ -156,14 +181,15 @@ namespace Extractor.Deep
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"Uanble to dump {offsetHexStr}: {ex.Message}");
+                    Console.WriteLine($"Unable to dump {hashHexStr}: {ex.Message}");
+                    logger.Error(ex, "[{ScsName}] Unable to dump {HashStr} ({Offset})", ScsName, hashHexStr, entry.Offset);
                     numFailed++;
                     continue;
                 }
 
                 var fileType = FileTypeHelper.Infer(fileBuffer);
                 var extension = FileTypeHelper.FileTypeToExtension(fileType);
-                var fileName = offsetHexStr + extension;
+                var fileName = hashHexStr + extension;
                 var outputPath = Path.Combine(outputDir, fileName);
                 Console.WriteLine($"Dumping {fileName} ...");
                 if (!Overwrite && File.Exists(outputPath))
@@ -172,6 +198,7 @@ namespace Extractor.Deep
                 }
                 else
                 {
+                    logger.Verbose("[{ScsName}] Dumping {FileName}", ScsName, fileName);
                     ExtractToDisk(entry, $"/{DumpDirectory}/{fileName}", outputPath);
                     numDumped++;
                 }
@@ -180,6 +207,7 @@ namespace Extractor.Deep
 
         public override void PrintPaths(bool includeAll)
         {
+            logger.Information("[{ScsName}] Searching archive contents for paths", ScsName);
             var finder = new HashFsPathFinder(Reader);
             finder.Find();
             var paths = (includeAll 
@@ -194,11 +222,17 @@ namespace Extractor.Deep
             Console.WriteLine($"{numExtracted} extracted " +
                 $"({renamedFiles.Count} renamed, {modifiedFiles.Count} modified, {numDumped} dumped), " +
                 $"{numSkipped} skipped, {numJunk} junk, {numFailed} failed");
+            logger.Information("[{ScsName}] {NumExtracted} extracted " +
+                "({NumRenamed} renamed, {NumModified} modified, {NumDumped} dumped), " +
+                "{NumSkipped} skipped, {NumJunk} junk, {NumFailed} failed",
+                ScsName, numExtracted, renamedFiles.Count, modifiedFiles.Count, 
+                numDumped, numSkipped, numJunk, numFailed);
             PrintRenameSummary(renamedFiles.Count, modifiedFiles.Count);
         }
 
         public override List<Tree.Directory> GetDirectoryTree()
         {
+            logger.Information("[{ScsName}] Searching archive contents for paths", ScsName);
             var finder = new HashFsPathFinder(Reader);
             finder.Find();
 
