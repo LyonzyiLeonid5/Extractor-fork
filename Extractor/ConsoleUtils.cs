@@ -16,7 +16,7 @@ namespace Extractor
             if (renamed > 0)
             {
                 Console.WriteLine($"WARN: {renamed} {(renamed == 1 ? "file" : "files")} had to be renamed and " +
-                    $"{modified} file{(renamed == 1 ? " was" : "s were")} modified accordingly.");
+                    $"{modified} file{(modified == 1 ? " was" : "s were")} modified accordingly.");
             }
         }
 

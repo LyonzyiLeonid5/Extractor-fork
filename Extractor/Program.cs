@@ -1,10 +1,13 @@
 ﻿using Extractor.Deep;
 using Extractor.Zip;
+using Serilog;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 using TruckLib.HashFs;
 using static Extractor.PathUtils;
@@ -13,9 +16,9 @@ namespace Extractor
 {
     class Program
     {
-        private const string Version = "2026-03-17";
         private static bool launchedByExplorer = false;
         private static Options opt;
+        private static ILogger logger;
 
         public static int Main(string[] args)
         {
@@ -41,29 +44,82 @@ namespace Extractor
                 return (int)ExitCode.Success;
             }
 
-            ValidateOptions();
+            ConfigureLogger(args);
 
-            var exitCode = Run();
+            var exitCode = ValidateOptions();
+            if (exitCode is null)
+            {
+                exitCode = Run();
+            }
+
+            logger.Information("Exiting with code {Code} ({CodeName})", (int)exitCode, exitCode.ToString());
+            Log.CloseAndFlush();
             PauseIfNecessary();
             return (int)exitCode;
         }
 
+        private static void ConfigureLogger(string[] args)
+        {
+            if (opt.Logging)
+            {
+                var loggerConfig = new LoggerConfiguration()
+                .MinimumLevel.Debug()
+                .Enrich.FromLogContext()
+                .Enrich.WithComputed("SourceContextName", "Substring(SourceContext, LastIndexOf(SourceContext, '.') + 1)")
+                .WriteTo.File(opt.LogFile, outputTemplate:
+                    "[{Timestamp:HH:mm:ss:ff} {Level:u3}] [{SourceContextName}] {Message:l}{NewLine}{Exception}");
+                Log.Logger = loggerConfig.CreateLogger();
+                logger = Log.ForContext<Program>();
+                LogDebugInformation(args);
+            }
+            else
+            {
+                logger = Log.ForContext<Program>();
+            }
+        }
+
+        private static void LogDebugInformation(string[] args)
+        {
+            logger.Information("Extractor version: {Version}", TextUtils.GetVersionString());
+
+            logger.Debug("Args: {Args}", args);
+            logger.Debug("OS: {Version}", RuntimeInformation.OSDescription);
+            logger.Debug(".NET version: {Version}", Environment.Version.ToString());
+            logger.Debug("Locale: {Locale}", CultureInfo.CurrentCulture);
+
+            // Characters which cannot be used in filenames according to the system
+            var printableIllegalPathCars = Path.GetInvalidFileNameChars().Order().Select(MakeCharPrintable);
+            logger.Debug("Illegal filename chars: {Chars}", string.Join(", ", printableIllegalPathCars));
+
+            // Characters which this program will sanitize if they occur in archive paths
+            var printableInvalidPathCars = InvalidPathChars.Select(MakeCharPrintable);
+            logger.Debug("Sanitized path chars: {Chars}", string.Join(", ", printableInvalidPathCars));
+
+            static string MakeCharPrintable(char c)
+            {
+                return char.IsAscii(c) && !char.IsControl(c) && !char.IsWhiteSpace(c)
+                    ? $"\"{c}\""
+                    : $"\"\\u{(int)c:X2}\"";
+            }
+        }
+
         private static void PrintUsage()
         {
-            Console.WriteLine($"Extractor {Version}\n");
+            Console.WriteLine($"Extractor {TextUtils.GetVersionString()}\n");
             Console.WriteLine("Usage:\n  extractor path... [options]\n");
             Console.WriteLine("Options:");
             opt.OptionSet.WriteOptionDescriptions(Console.Out);
             PauseIfNecessary();
         }
 
-        private static void ValidateOptions()
+        private static ExitCode? ValidateOptions()
         {
             if (opt.InputPaths is null || opt.InputPaths.Count == 0)
             {
                 Console.Error.WriteLine("No input paths specified.");
+                logger.Error("No input paths specified.");
                 PauseIfNecessary();
-                Environment.Exit((int)ExitCode.NoInput);
+                return ExitCode.NoInput;
             }
 
             Dictionary<string, bool> modeSwitches = new()
@@ -82,9 +138,12 @@ namespace Extractor
                 if (X.Value && Y.Value)
                 {
                     Console.Error.WriteLine($"--{X.Key} and --{Y.Key} cannot be combined.");
-                    Environment.Exit((int)ExitCode.IncompatibleOptions);
+                    logger.Error("Invalid option combination: --{A} and --{B}", X.Key, Y.Key);
+                    return ExitCode.IncompatibleOptions;
                 }
             }
+
+            return null;
         }
 
         private static ExitCode Run()
@@ -93,6 +152,7 @@ namespace Extractor
             if (scsPaths.Length == 0)
             {
                 Console.Error.WriteLine("No .scs files were found.");
+                logger.Error("No .scs files were found.");
                 return ExitCode.NoInput;
             }
 
@@ -104,6 +164,7 @@ namespace Extractor
             List<ExtractionResult> results = new(scsPaths.Length);
             foreach (var scsPath in scsPaths)
             {
+                logger.Information("Constructing extractor for \"{Path}\"", scsPath);
                 Extractor extractor;
                 try
                 {
@@ -135,6 +196,7 @@ namespace Extractor
                     else
                     {
                         Console.Error.WriteLine("--list-entries can only be used with HashFS archives.");
+                        logger.Error("--list-entries can only be used with HashFS archives.");
                         results.Add(ExtractionResult.IncompatibleOptions);
                     }
                 }
@@ -220,6 +282,7 @@ namespace Extractor
             if (!File.Exists(scsPath))
             {
                 Console.Error.WriteLine($"{scsPath} is not a file or does not exist.");
+                logger.Error("\"{Path}\" is not a file or does not exist.", scsPath);
                 throw new FileNotFoundException();
             }
 
@@ -242,12 +305,13 @@ namespace Extractor
                 }
                 else
                 {
-                    extractor = new ZipExtractor(scsPath, opt);
+                    extractor = CreateZipExtractor(scsPath);
                 }
             }
-            catch (InvalidDataException)
+            catch (InvalidDataException idex)
             {
                 Console.Error.WriteLine($"Unable to open {scsPath}: Not a HashFS or ZIP archive");
+                logger.Error(idex, "Unable to create extractor for \"{Path}\": Not a HashFS or ZIP archive", scsPath);
                 throw;
             }
             catch (Exception ex)
@@ -257,25 +321,39 @@ namespace Extractor
                 // If that also fails, print the original HashFS error message.
                 try
                 {
-                    extractor = new ZipExtractor(scsPath, opt);
+                    extractor = CreateZipExtractor(scsPath);
                 }
                 catch
                 {
                     Console.Error.WriteLine($"Unable to open {scsPath}: {ex.Message}");
+                    logger.Error(ex, "Unable to create extractor for \"{Path}\"", scsPath);
                     throw;
                 }
             }
             return extractor;
         }
 
+        private static Extractor CreateZipExtractor(string scsPath)
+        {
+            Extractor extractor = new ZipExtractor(scsPath, opt);
+            logger.Information("Opened \"{Path}\" with {Class}", scsPath, nameof(ZipExtractor));
+            return extractor;
+        }
+
         private static Extractor CreateHashFsExtractor(string scsPath)
         {
+            Extractor extractor;
+
             if (opt.UseRawExtractor)
-                return new HashFsRawExtractor(scsPath, opt);
+                extractor = new HashFsRawExtractor(scsPath, opt);
             else if (opt.UseDeepExtractor)
-                return new HashFsDeepExtractor(scsPath, opt);
+                extractor = new HashFsDeepExtractor(scsPath, opt);
             else
-                return new HashFsExtractor(scsPath, opt);
+                extractor = new HashFsExtractor(scsPath, opt);
+
+            logger.Information("Opened \"{Path}\" with {Class}", scsPath, extractor.GetType().Name);
+
+            return extractor;
         }
 
         private static ExitCode DoMultiDeepExtraction(string[] scsPaths)
@@ -340,7 +418,8 @@ namespace Extractor
                 }
             }
 
-            SiiPathFinder.FindPathsInUnconsumedSuis(consumedSuis, everything, multiModWrapper);
+            var siiPathFinder = new SiiPathFinder();
+            siiPathFinder.FindPathsInUnconsumedSuis(consumedSuis, everything, multiModWrapper);
 
             foreach (var extractor in extractors)
             {

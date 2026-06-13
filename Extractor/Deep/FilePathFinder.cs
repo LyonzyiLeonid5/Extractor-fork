@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Serilog;
+using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.IO;
@@ -99,6 +100,10 @@ namespace Extractor.Deep
 
         private readonly HashSet<string> consumedSuis;
 
+        private readonly ILogger logger;
+
+        private readonly SiiPathFinder siiPathFinder = new();
+
         /// <summary>
         /// Instantiates a <c>FilePathFinder</c>.
         /// </summary>
@@ -113,6 +118,8 @@ namespace Extractor.Deep
             HashSet<string> referencedFiles, HashSet<string> dirsToSearchForRelativeTobj,
             HashSet<string> consumedSuis)
         {
+            logger = Log.ForContext<FilePathFinder>();
+
             this.visited = visited;
             this.dirsToSearchForRelativeTobj = dirsToSearchForRelativeTobj;
             this.referencedFiles = referencedFiles;
@@ -146,23 +153,9 @@ namespace Extractor.Deep
 
             if (finders.TryGetValue(fileType, out var finder))
             {
-                try
-                {
-                    return finder(fileBuffer, filePath);
-                }
-                catch (Exception ex)
-                {
-                    #if DEBUG
-                    Console.Error.WriteLine($"Unable to parse {filePath}: " +
-                        $"{ex.GetType().Name}: {ex.Message.Trim()}");
-                    #endif
-                    return [];
-                }
+                return finder(fileBuffer, filePath);
             }
-            else
-            {
-                return [];
-            }
+            return [];
         }
 
         /// <summary>
@@ -173,7 +166,7 @@ namespace Extractor.Deep
         /// <returns>Discovered paths.</returns>
         private PotentialPaths FindPathsInSii(byte[] fileBuffer, string filePath)
         {
-            var (potentialPaths, newSuis) = SiiPathFinder.FindPathsInSii(fileBuffer, filePath, fs);
+            var (potentialPaths, newSuis) = siiPathFinder.FindPathsInSii(fileBuffer, filePath, fs);
             consumedSuis.UnionWith(newSuis);
             potentialPaths.ExceptWith(visited);
             return potentialPaths;
@@ -211,18 +204,15 @@ namespace Extractor.Deep
         /// <returns>Discovered paths.</returns>
         private PotentialPaths FindPathsInMat(byte[] fileBuffer, string filePath)
         {
+            // Purposefully mislabeled .sii file?
+            if (fileBuffer.Length > 8 && fileBuffer.AsSpan(0, 8).SequenceEqual("SiiNunit"u8))
+            {
+                return FindPathsInSii(fileBuffer, filePath);
+            }
+
             PotentialPaths potentialPaths = [];
 
-            MatFile mat;
-            try
-            {
-                mat = MatFile.Load(Encoding.UTF8.GetString(fileBuffer));
-            }
-            catch (Exception)
-            {
-                //Debugger.Break();
-                throw;
-            }
+            var mat = MatFile.Load(Encoding.UTF8.GetString(fileBuffer));
 
             foreach (var texture in mat.Textures)
             {

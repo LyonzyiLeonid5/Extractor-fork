@@ -34,6 +34,21 @@ namespace Extractor.Deep
             if (Add(str))
             {
                 AddPathVariants(str, visited);
+                AddParentDirs(str);
+            }
+        }
+
+        private void AddParentDirs(string str)
+        {
+            string parent = str;
+            while (true)
+            {
+                parent = GetParent(parent);
+                if (parent == "/" || parent is null)
+                {
+                    break;
+                }
+                Add(parent);
             }
         }
 

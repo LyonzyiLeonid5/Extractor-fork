@@ -49,7 +49,7 @@ extractor path... [options]
 <tr>
   <td></td>
   <td><code>--dry-run</code></td>
-  <td>Don't write anything to disk.</td>
+  <td>Don't extract anything to disk.</td>
 </tr>
 <tr>
   <td><code>-f</code></td>
@@ -75,6 +75,12 @@ extractor path... [options]
   <td><code>--list-all</code></td>
   <td>Lists all paths referenced by files in the archive, even if they are not contained in it.
   (Implicitly activates <code>--deep</code>.) Can be combined with <code>--all</code>, <code>--filter</code>, and <code>--partial</code>.</td>
+</tr>
+<tr>
+  <td></td>
+  <td><code>--log</code></td>
+  <td>Writes a log file for debugging purposes. If no output path is specified,
+  the log file will be written to <code>./_extraction.log</code>.</td>
 </tr>
 <tr>
   <td><code>-p</code></td>

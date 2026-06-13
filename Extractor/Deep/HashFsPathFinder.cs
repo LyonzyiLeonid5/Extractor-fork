@@ -1,4 +1,5 @@
 ﻿using Extractor.Properties;
+using Serilog;
 using Sprache;
 using System;
 using System.Collections.Generic;
@@ -85,9 +86,13 @@ namespace Extractor.Deep
         /// </summary>
         private readonly HashSet<string> dirsToSearchForRelativeTobj;
 
+        private readonly ILogger logger;
+
         public HashFsPathFinder(IHashFsReader reader, IList<string> additionalStartPaths = null, 
             Dictionary<ulong, IEntry> junkEntries = null, AssetLoader multiModWrapper = null)
         {
+            logger = Log.ForContext<HashFsPathFinder>();
+
             this.reader = reader;
             this.additionalStartPaths = additionalStartPaths;
             this.junkEntries = junkEntries ?? [];
@@ -112,8 +117,11 @@ namespace Extractor.Deep
             var potentialPaths = LoadStartPaths();
             if (additionalStartPaths is not null)
                 potentialPaths.UnionWith(additionalStartPaths);
+
+            logger.Information("Exploring start paths");
             ExplorePotentialPaths(potentialPaths);
 
+            logger.Information("Scanning undiscovered entries");
             var morePaths = FindPathsInUnvisited();
             ExplorePotentialPaths(morePaths);
 
@@ -127,22 +135,28 @@ namespace Extractor.Deep
         /// Loads the set of initial paths which the path finder will check for.
         /// </summary>
         /// <returns>The initial paths.</returns>
-        private static PotentialPaths LoadStartPaths()
+        private PotentialPaths LoadStartPaths()
         {
             using var inMs = new MemoryStream(Resources.DeepStartPaths);
             using var ds = new GZipStream(inMs, CompressionMode.Decompress);
             using var outMs = new MemoryStream();
             ds.CopyTo(outMs);
             var lines = Encoding.UTF8.GetString(outMs.ToArray());
-            return LinesToHashSet(lines);
+            var set = LinesToHashSet(lines);
+            logger.Information("Loaded {Num} start paths", set.Count);
+            return set;
         }
 
         private void ExplorePotentialPaths(PotentialPaths potentialPaths)
         {
+            int gen = 0;
             do
             {
                 potentialPaths = FindPaths(potentialPaths);
                 potentialPaths.ExceptWith(visited);
+                logger.Debug("Iteration {Gen}: Found {NumPaths} new potential paths", 
+                    gen, potentialPaths.Count);
+                gen++;
             }
             while (potentialPaths.Count > 0);
         }
@@ -179,19 +193,21 @@ namespace Extractor.Deep
                 {
                     fileBuffer = reader.Extract(entry, "")[0];
                 }
-                catch (InvalidDataException)
+                catch (InvalidDataException idex)
                 {
                     #if DEBUG
-                        Console.WriteLine($"Unable to decompress, likely junk: {entry.Hash:X16} ({entry.Offset:X})");
+                        Console.WriteLine($"Unable to decompress {entry.Hash:x16} ({entry.Offset:x}), likely junk");
                     #endif
+                    logger.Error(idex, "Unable to decompress {Entry:x16} ({Offset:x}), likely junk", entry.Hash, entry.Offset);
                     junkEntries.TryAdd(entry.Hash, entry);
                     continue;
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
                     #if DEBUG
                         Debugger.Break();
                     #endif
+                    logger.Error(ex, "Unable to extract {Entry:x16} ({Offset:x})", entry.Hash, entry.Offset);
                     continue;
                 }
 
@@ -215,11 +231,13 @@ namespace Extractor.Deep
                 }
                 catch (Exception ex)
                 {
+                    var extension = FileTypeHelper.FileTypeToExtension(type);
                     #if DEBUG
-                        var extension = FileTypeHelper.FileTypeToExtension(type);
-                        Console.Error.WriteLine($"Unable to parse {entry.Hash:X16}{extension}: " +
+                        Console.Error.WriteLine($"Unable to parse {entry.Hash:x16}{extension}: " +
                             $"{ex.GetType().Name}: {ex.Message}");
                     #endif
+                    logger.Error(ex, "Unable to parse {Entry:x16}{Extension} ({Offset})", 
+                        entry.Hash, extension, entry.Offset);
                     continue;
                 }
             }
@@ -233,6 +251,8 @@ namespace Extractor.Deep
         /// <returns>The decoy paths.</returns>
         private HashSet<string> FindDecoyPaths()
         {
+            logger.Information("Searching for decoy paths");
+
             HashSet<string> decoyPaths = [];
 
             foreach (var path in FoundFiles)
@@ -242,19 +262,31 @@ namespace Extractor.Deep
                 {
                     if (junkEntries.ContainsKey(reader.HashPath(cleaned)))
                     {
-                        decoyPaths.Add(cleaned);
+                        FoundDecoyPath(cleaned, path);
                     }
                     else if (reader.FileExists(cleaned))
                     {
                         var entry = reader.GetEntry(cleaned);
                         visited.Add(cleaned);
                         visitedEntries.Add(entry);
-                        decoyPaths.Add(cleaned);
+                        FoundDecoyPath(cleaned, path);
                     }
                 }
             }
 
+            if (decoyPaths.Count > 0)
+            {
+                logger.Information("Found {NumDecoyPaths} decoy paths", decoyPaths.Count);
+            }
+
             return decoyPaths;
+
+            void FoundDecoyPath(string decoyPath, string realPath)
+            {
+                decoyPaths.Add(decoyPath);
+                logger.Verbose("Found decoy path \"{DecoyPath}\" (pretending to be \"{RealPath}\")",
+                    decoyPath, realPath);
+            }
         }
 
         /// <summary>
@@ -294,9 +326,12 @@ namespace Extractor.Deep
                         catch (Exception ex)
                         {
                             #if DEBUG
-                            Console.Error.WriteLine($"Unable to parse {ReplaceControlChars(file)}: " +
-                                $"{ex.GetType().Name}: {ex.Message.Trim()}");
+                                Console.Error.WriteLine($"Unable to parse {ReplaceControlChars(file)}: " +
+                                    $"{ex.GetType().Name}: {ex.Message.Trim()}");
                             #endif
+                            var entry = reader.GetEntry(file);
+                            logger.Error(ex, "Unable to parse {Path} ({Hash:x16} at {Offset})", 
+                                file, entry.Hash, entry.Offset);
                         }
                     },
                     (_) => { }
@@ -352,6 +387,8 @@ namespace Extractor.Deep
 
         private void VisitMapSectorPaths(string mapName)
         {
+            logger.Information("Visiting map sector paths for \"{MapName}.mbd\"", mapName);
+
             const int extent = 70;
             for (int z = -extent; z < extent + 1; z++)
             {

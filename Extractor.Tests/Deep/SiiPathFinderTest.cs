@@ -13,8 +13,9 @@ namespace Extractor.Tests.Deep
         [Fact]
         public void ProcessSiiSoundAttribute()
         {
+            var spf = new SiiPathFinder();
             PotentialPaths actual = [];
-            SiiPathFinder.ProcessSiiUnitAttribute("accessory_interior_data",
+            spf.ProcessSiiUnitAttribute("accessory_interior_data",
                 new("sounds", new string[] {
                     "air_warning|/def/vehicle/truck/foo/air_warning.soundref",
                     "system_warning1|/sound/truck/foo/bar.bank#interior/system_warning1",
@@ -25,7 +26,7 @@ namespace Extractor.Tests.Deep
                 "/sound/truck/foo/bar.bank",
                 "/sound/truck/foo/bar.bank.guids"
                 ];
-            Assert.Equal(expected, actual);
+            Assert.Subset(actual, expected);
         }
 
         [Fact]
@@ -66,7 +67,8 @@ namespace Extractor.Tests.Deep
                 }
                 """;
 
-            var (paths, _) = SiiPathFinder.FindPathsInSii(siiStr, "", null);
+            var spf = new SiiPathFinder();
+            var (paths, _) = spf.FindPathsInSii(siiStr, "", null);
 
             Assert.Contains("/material/ui/accessory/hello/test.foo.mat", paths);
         }

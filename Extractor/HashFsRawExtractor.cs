@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Serilog;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -9,8 +10,11 @@ namespace Extractor
 {
     public class HashFsRawExtractor : HashFsExtractor
     {
+        private readonly ILogger logger;
+
         public HashFsRawExtractor(string scsPath, Options opt) : base(scsPath, opt)
         {
+            logger = Log.ForContext<HashFsRawExtractor>();
         }
 
         public override void Extract(string destination)
@@ -37,6 +41,9 @@ namespace Extractor
         public override void PrintExtractionResult()
         {
             Console.WriteLine($"{numExtracted} extracted, {numSkipped} skipped, {numJunk} junk, {numFailed} failed");
+            logger.Information("[{ScsName}] {NumExtracted} extracted, {NumSkipped} skipped, " +
+                "{NumJunk} junk, {NumFailed} failed",
+                ScsName, numExtracted, numSkipped, numJunk, numFailed);
         }
 
         public override void PrintPaths(bool includeAll)
