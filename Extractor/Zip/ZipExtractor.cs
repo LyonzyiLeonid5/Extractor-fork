@@ -9,6 +9,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using TruckLib;
+using TruckLib.Sii;
 using static Extractor.ConsoleUtils;
 using static Extractor.PathUtils;
 using static Extractor.TextUtils;
@@ -168,7 +169,18 @@ namespace Extractor.Zip
             using var ms = new MemoryStream();
             Reader.GetEntry(entry, ms);
             var buffer = ms.ToArray();
-            var wasModified = PerformSubstitutionIfRequired(entry.FileName, ref buffer, substitutions);
+
+            var extension = Path.GetExtension(fileName).ToLowerInvariant();
+            if (extension == ".sii")
+            {
+                buffer = SiiFile.Decode(buffer);
+            }
+
+            var wasModified = false;
+            if (!opt.DisablePathUpdates)
+            {
+                wasModified = PerformSubstitutionIfRequired(entry.FileName, ref buffer, substitutions);
+            }
 
             if (!opt.DryRun)
             {

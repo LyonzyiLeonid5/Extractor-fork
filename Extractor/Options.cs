@@ -28,6 +28,11 @@ namespace Extractor
         public string Destination { get; set; } = "./extracted";
 
         /// <summary>
+        /// Disables automatic updates of referenced renamed paths during extraction.
+        /// </summary>
+        public bool DisablePathUpdates { get; set; } = false;
+
+        /// <summary>
         /// Don't write anything to disk.
         /// </summary>
         public bool DryRun { get; set; } = false;
@@ -177,6 +182,9 @@ namespace Extractor
                         } 
                     } 
                 },
+                { "no-update",
+                    $"Don't update references to paths that had to be renamed during extraction.",
+                    x => { DisablePathUpdates = true; } },
                 { "p=|partial=",
                     "Limits extraction to the comma-separated list of files and/or " +
                     "directories specified, e.g.:\n" +

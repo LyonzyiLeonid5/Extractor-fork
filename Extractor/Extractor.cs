@@ -75,6 +75,7 @@ namespace Extractor
             var wasModified = false;
 
             var extension = Path.GetExtension(archivePath).ToLowerInvariant();
+
             if (substitutions is not null && substitutions.Count > 0)
             {
                 if (extension == ".sii" || extension == ".sui" || extension == ".mat")
@@ -84,13 +85,6 @@ namespace Extractor
                 else if (extension == ".tobj")
                 {
                     (wasModified, buffer) = SubstitutePathsInTobj(buffer, substitutions);
-                }
-            }
-            else
-            {
-                if (extension == ".sii" || extension == ".sui")
-                {
-                    buffer = SiiFile.Decode(buffer);
                 }
             }
 

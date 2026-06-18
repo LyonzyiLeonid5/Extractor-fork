@@ -62,7 +62,7 @@ extractor path... [options]
   <code>-f=/def/vehicle/truck/*/engine/*</code>: extract engine definitions for trucks</code><br>
   <code>-f=r/\.p(m[acdg]|pd)$/</code>: extract model files (.pmd, .pmg, ...)</code>
   </p>
-  <p>When using regex, remember to insert escape characters where necessary.</p>
+  <p>When using regex patterns, remember to insert escape characters where necessary.</p>
   </td>
 </tr>
 <tr>
@@ -81,6 +81,11 @@ extractor path... [options]
   <td><code>--log</code></td>
   <td>Writes a log file for debugging purposes. If no output path is specified,
   the log file will be written to <code>./_extraction.log</code>.</td>
+</tr>
+<tr>
+  <td></td>
+  <td><code>--no-update</code></td>
+  <td>Don't update references to paths that had to be renamed during extraction.</td>
 </tr>
 <tr>
   <td><code>-p</code></td>

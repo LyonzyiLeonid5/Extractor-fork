@@ -10,6 +10,7 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using TruckLib;
 using TruckLib.HashFs;
+using TruckLib.Sii;
 using static Extractor.ConsoleUtils;
 using static Extractor.PathUtils;
 using static Extractor.TextUtils;
@@ -273,11 +274,21 @@ namespace Extractor
             {
                 var buffers = Reader.Extract(entry, archivePath);
 
-                var wasModified = PerformSubstitutionIfRequired(archivePath, ref buffers[0], substitutions);
-                if (wasModified)
+                var extension = Path.GetExtension(archivePath).ToLowerInvariant();
+                if (extension == ".sii")
                 {
-                    logger.Verbose("[{ScsName}] \"{Path}\" has been modified to update renamed paths",               
-                        ScsName, archivePath);
+                    buffers[0] = SiiFile.Decode(buffers[0]);
+                }
+
+                var wasModified = false;
+                if (!opt.DisablePathUpdates)
+                {
+                    wasModified = PerformSubstitutionIfRequired(archivePath, ref buffers[0], substitutions);
+                    if (wasModified)
+                    {
+                        logger.Verbose("[{ScsName}] \"{Path}\" has been modified to update renamed paths",
+                            ScsName, archivePath);
+                    }
                 }
 
                 if (!opt.DryRun)
