@@ -1,4 +1,4 @@
-﻿using Mono.Options;
+﻿﻿using Mono.Options;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -15,6 +15,7 @@ namespace Extractor
 {
     public class Options
     {
+        public string[] RawArgs { get; private set; }
         public OptionSet OptionSet { get; init; }
 
         /// <summary>
@@ -227,7 +228,15 @@ namespace Extractor
 
         public void Parse(string[] args)
         {
+            RawArgs = args;
+
             var inputPaths = OptionSet.Parse(args);
+
+            // Filter out everything that looks like flags
+            inputPaths = inputPaths
+                .Where(p => !p.StartsWith("-") && !p.StartsWith("/"))
+                .ToList();
+
             ProcessInputPaths(inputPaths);
         }
 

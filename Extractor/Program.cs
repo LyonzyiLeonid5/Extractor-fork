@@ -1,4 +1,4 @@
-﻿using Extractor.Deep;
+﻿﻿using Extractor.Deep;
 using Extractor.Zip;
 using Serilog;
 using System;
@@ -7,6 +7,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using TruckLib.HashFs;
@@ -148,6 +149,7 @@ namespace Extractor
 
         private static ExitCode Run()
         {
+            var plugins = LoadPlugins();
             var scsPaths = GetScsPathsFromArgs();
             if (scsPaths.Length == 0)
             {
@@ -169,6 +171,7 @@ namespace Extractor
                 try
                 {
                     extractor = CreateExtractor(scsPath);
+                    RunPlugins(plugins, opt.RawArgs, extractor, false);
                 }
                 catch (FileNotFoundException)
                 {
@@ -217,6 +220,7 @@ namespace Extractor
                     try
                     {
                         extractor.Extract(GetDestination(scsPath));
+                        RunPlugins(plugins, opt.RawArgs, extractor, true);
                         results.Add(ExtractionResult.Success);
                     }
                     catch (RootMissingException)
@@ -234,6 +238,75 @@ namespace Extractor
             }
 
             return DetermineExitCode(results);
+        }
+
+        private static List<Type> LoadPlugins()
+        {
+            List<Type> plugins = new();
+
+            string baseDir = Path.GetDirectoryName(Environment.ProcessPath);
+            var dlls = Directory.GetFiles(baseDir, "*.dll");
+
+            foreach (var dll in dlls)
+            {
+                try
+                {
+                    var assembly = Assembly.LoadFrom(dll);
+
+                    foreach (var type in assembly.GetTypes())
+                    {
+                        var canRun = type.GetMethod("CanRun", BindingFlags.Public | BindingFlags.Static);
+                        var run = type.GetMethod("Run", BindingFlags.Public | BindingFlags.Static);
+
+                        if (canRun != null && run != null)
+                        {
+                            plugins.Add(type);
+                        }
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            return plugins;
+        }
+
+        private static void RunPlugins(List<Type> plugins, string[] args, Extractor extractor, bool afterExtraction = false)
+        {
+            foreach (var plugin in plugins)
+            {
+                try
+                {
+                    var canRun = plugin.GetMethod("CanRun");
+                    var run = plugin.GetMethod("Run");
+
+                    if (canRun == null || run == null)
+                        continue;
+
+                    bool shouldRun = (bool)canRun.Invoke(null, new object[] { args });
+
+                    if (!shouldRun)
+                        continue;
+
+                    bool wantsAfterExtraction = false;
+
+                    var afterMethod = plugin.GetMethod("RunAfterExtraction");
+
+                    if (afterMethod != null)
+                    {
+                        wantsAfterExtraction = (bool)afterMethod.Invoke(null, null);
+                    }
+
+                    if (afterExtraction != wantsAfterExtraction)
+                        continue;
+
+                    run.Invoke(null, new object[] { args, extractor });
+                }
+                catch
+                {
+                }
+            }
         }
 
         private static ExitCode DetermineExitCode(List<ExtractionResult> results)

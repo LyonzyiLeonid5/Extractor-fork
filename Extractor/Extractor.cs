@@ -1,4 +1,4 @@
-﻿using System;
+﻿﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using TruckLib;
@@ -85,6 +85,13 @@ namespace Extractor
                 else if (extension == ".tobj")
                 {
                     (wasModified, buffer) = SubstitutePathsInTobj(buffer, substitutions);
+                }
+            }
+            else
+            {
+                if (extension == ".sii" || extension == ".sui")
+                {
+                    buffer = SiiFile.Decode(buffer);
                 }
             }
 
