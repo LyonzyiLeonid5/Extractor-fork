@@ -278,27 +278,27 @@ extractor "path\to\mod\directory" --all --deep --separate
 
 Just run your plugin:
 ```sh
-extractor.exe file.scs --deep --myplugin
+extractor.exe "file.scs" --deep --myplugin
 ```
 View information about the plugin's work:
 ```sh
-extractor.exe file.scs --deep --myplugin --plugin-debug
+extractor.exe "file.scs" --deep --myplugin --plugin-debug
 ```
 Force loading your plugin:
 ```sh
-extractor.exe file.scs --deep --plugin-load=MyPlugin
+extractor.exe "file.scs" --deep --plugin-load=MyPlugin
 ```
 Force load all plugins from a folder:
 ```sh
-extractor.exe file.scs --deep --plugin-load-all
+extractor.exe "file.scs" --deep --plugin-load-all
 ```
 Force loading all plugins from the folder that start with My:
 ```sh
-extractor.exe file.scs --deep --plugin-load-all --plugin-prefix=My
+extractor.exe "file.scs" --deep --plugin-load-all --plugin-prefix=My
 ```
 Force loading of your and other plugins with mandatory execution of each:
 ```sh
-extractor.exe file.scs --deep --myplugin --plugin-load=OtherPlugin --plugin-ignore-exit
+extractor.exe "file.scs" --deep --myplugin --plugin-load=OtherPlugin --plugin-ignore-exit
 ```
 
 
