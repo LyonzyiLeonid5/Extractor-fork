@@ -191,52 +191,42 @@ extractor path... [options]
   </tr>
 </thead>
 <tr>
-  <td></td>
   <td><code>--plugin-debug</code></td>
   <td>Show debug information</td>
 </tr>
 <tr>
-  <td></td>
   <td><code>--plugin-load-all</code></td>
   <td>Load all available plugins regardless of their CanRun result.</td>
 </tr>
 <tr>
-  <td></td>
   <td><code>--plugin-load=VALUE</code></td>
   <td>Load only specific plugins by name(comma-separated). Example: --plugin-load=MyPlugin, AnotherPlugin</td>
 </tr>
 <tr>
-  <td></td>
   <td><code>--plugin-disable=VALUE</code></td>
   <td>Disable specific plugins by name (comma-separated).</td>
 </tr>
 <tr>
-  <td></td>
   <td><code>--plugin-dir=VALUE</code></td>
   <td>Load plugins from a specific directory instead of the default.</td>
 </tr>
 <tr>
-  <td></td>
   <td><code>--plugin-prefix=VALUE</code></td>
   <td>Load only plugins whose DLL filename starts with the given prefix.</td>
 </tr>
 <tr>
-  <td></td>
   <td><code>--plugin-verbose</code></td>
   <td>Show detailed information about loaded plugins.</td>
 </tr>
 <tr>
-  <td></td>
   <td><code>--plugin-save-output</code></td>
   <td>Save plugin output to separate files in the plugin directory.</td>
 </tr>
 <tr>
-  <td></td>
   <td><code>--plugin-list</code></td>
   <td>List all available plugins and exit. Use with --plugin-verbose for more details.</td>
 </tr>
 <tr>
-  <td></td>
   <td><code>--plugin-ignore-exit</code></td>
   <td>Ignore Environment.Exit calls from plugins.</td>
 </tr>
