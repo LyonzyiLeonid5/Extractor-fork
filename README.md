@@ -183,18 +183,6 @@ extractor path... [options]
 
 ### Plugin options
 
-| Parameter | Description |
-|---|---|
-| `--plugin-debug` | Show debug information |
-| `--plugin-load-all` | Load all plugins regardless of `CanRun` |
-| `--plugin-load=PluginName` | Load only specified plugin |
-| `--plugin-disable=PluginName` | Disable specified plugin |
-| `--plugin-dir=./plugins` | Plugin directory |
-| `--plugin-prefix=Prefix` | Load DLLs with prefix |
-| `--plugin-verbose` | Verbose plugin info |
-| `--plugin-save-output` | Save plugin output |
-| `--plugin-list` | List plugins |
-| `--plugin-ignore-exit` | Ignore `Environment.Exit` |
 <table>
 <thead>
   <tr>
@@ -429,12 +417,6 @@ namespace Extractor.Deep
             {
                 Console.WriteLine($"Archive: {extractor.ScsPath}");
                 Console.WriteLine($"Entries: {deep.Reader.Entries.Count}");
-            }
-            else
-            {
-                Console.WriteLine("This plugin requires --deep mode!");
-                Environment.Exit(0);
-                return;
             }
 
             Console.WriteLine("MyPlugin finished!");
