@@ -9,6 +9,7 @@ A cross-platform .scs extractor for both HashFS and ZIP.
 * Raw dumps
 * Built-in path-finding mode for HashFS archives without directory listings
 * Automatic conversion of 3nK-encoded and encrypted SII files
+* Reading and executing DLL files
 
 
 ## Build
@@ -239,7 +240,7 @@ extractor "path\to\mod\directory" --all --deep --separate
 
 ### Plugin Examples
 
-```bash
+```sh
 extractor.exe file.scs --deep --myplugin
 extractor.exe file.scs --deep --myplugin --plugin-debug
 extractor.exe file.scs --deep --plugin-load=MyPlugin
@@ -250,37 +251,66 @@ extractor.exe file.scs --deep --myplugin --plugin-ignore-exit
 
 ## Plugin Development
 
+### CSPROJ Structure
+
+```xml
+<!--This is a template. You can use it for all plugins. Just rename it!-->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Extractor\Extractor.csproj" /> <!--REQUIRED REFERENCE!!!-->
+  </ItemGroup>
+
+  <PropertyGroup>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>
+```
+
 ### Plugin structure
 
 ```csharp
-using System;
-using System.Linq;
-using System.IO;
-using Extractor;
-using TruckLib;
-using TruckLib.HashFs;
-using TruckLib.Sii;
+using System; //<--- REQUIRED
+using System.Linq; //<--- Recommended
+using System.IO; //<--- Recommended
+using Extractor; //<--- REQUIRED
+using TruckLib; //<--- Recommended
+using TruckLib.HashFs; //<--- Recommended
+using TruckLib.Sii; //<--- Recommended
 
-namespace Extractor.Deep
+namespace Extractor.Deep //namespace Extractor is REQUIRED, but I highly recommend use namespace Extractor.Deep for more useful information
 {
-    public class PluginName
+    public class PluginName //Your plugin name
     {
-        public static bool CanRun(string[] args)
+        public static bool CanRun(string[] args) //<---REQURED method
         {
-            if (!args.Any(a => a.Equals("--deep", StringComparison.OrdinalIgnoreCase)))
+            return args.Any(a => a.Equals("--plugin", StringComparison.OrdinalIgnoreCase) || a.Equals("-plugin", StringComparison.OrdinalIgnoreCase)); //This is a prerequisite for running the plugin. You can configure it.
+        }
+
+        //Optional variables for configuring plugin startup. They are not required; by default, false
+        public static bool RunAfterExtraction(){return true;} //<--- Runs the plugin after the extractor actions.
+        public static bool IgnoreExit(){return true;} //<--- Ignores Enviroment.Exit(0). Allows the plugin to run in any case.
+
+        public static void Run(string[] args, Extractor extractor) //<--- Required MAIN Plugin logic method
+        {
+          //If you use the Extractor.Deep namespace, you should be aware that missing the --deep parameter may cause the code to behave incorrectly.
+          if (!args.Any(a => a.Equals("--deep", StringComparison.OrdinalIgnoreCase)))
             {
                 Console.WriteLine("Requires --deep launch parameter!");
                 Console.WriteLine("If you wrote it, it means the archive is either a regular ZIP or a regular HashFs, which can be unpacked in the usual way.");
-                return false;
+                //Stops process without --deep
+                Environment.Exit(0);
             }
-            return args.Any(a => a.Equals("--manifest", StringComparison.OrdinalIgnoreCase) || a.Equals("-manifest", StringComparison.OrdinalIgnoreCase));
-        }
-
-        public static bool RunAfterExtraction() => false;
-        public static bool IgnoreExit() => false;
-
-        public static void Run(string[] args, Extractor extractor)
-        {
+            //Your Code
+            int entries = 0;
+            foreach(var entry in entries)
+            {
+            }
+            //Stops the entire program. But if you need to continue, you don't have to write this.
             Environment.Exit(0);
         }
     }
@@ -301,17 +331,23 @@ namespace Extractor.Deep
     {
         public static bool CanRun(string[] args)
         {
-            if (!args.Any(a => a.Equals("--deep", StringComparison.OrdinalIgnoreCase)))
-            {
-                Console.WriteLine("Requires --deep launch parameter!");
-                return false;
-            }
-
             return args.Any(a => a.Equals("--myplugin", StringComparison.OrdinalIgnoreCase));
+        }
+        public static bool RunAfterExtraction(){
+          return true;
+        }
+        public static bool IgnoreExit(){
+          return false;
         }
 
         public static void Run(string[] args, Extractor extractor)
         {
+            if (!args.Any(a => a.Equals("--deep", StringComparison.OrdinalIgnoreCase)))
+            {
+                Console.WriteLine("Requires --deep launch parameter!");
+                Console.WriteLine("If you wrote it, it means the archive is either a regular ZIP or a regular HashFs, which can be unpacked in the usual way.");
+                Environment.Exit(0);
+            }
             Console.WriteLine("MyPlugin started!");
 
             if (extractor is HashFsDeepExtractor deep)
@@ -327,16 +363,25 @@ namespace Extractor.Deep
             }
 
             Console.WriteLine("MyPlugin finished!");
+            Environment.Exit(0);
         }
     }
 }
 ```
 
+### Compile Your Plugin
+
+1. Install `Microsoft .NET Framework`.
+2. Open `Microsoft PowerShell` in folder with your plugin.
+3. Write <code>dotnet build -c Release</code>
+4. Go to `YourPlugin\bin\Release\net10.0\` and get `YourPlugin.dll`. It is your compiled plugin.
+5. Then just place it in the folder with the rest of the plugins and try to run it.
+
 ### Notes
 
-- Use `using Extractor;`
-- Recommended namespace: `Extractor.Deep`
-- `CanRun` and `Run` are required.
-- `RunAfterExtraction` and `IgnoreExit` are optional.
-- Check `--deep`.
-- Use `extractor is HashFsDeepExtractor`.
+- Plugins must be in the same folder as `extractor.exe`! Or specify a different folder in the launch options.
+- Not all the necessary functions for working with .scs files are available in the extractor. Try searching for them in TruckLib.
+- There's no need to change or add to the standard extractor parameters. Improve yours.
+- Keep in mind that you will lose a lot if you don't use --deep.
+- Before you begin, please review the extractor code and the structure of what you're about to process. This will prevent you from making silly mistakes and save you time.
+- Compile your plugins only into DLL files or their Linux equivalent. The program won't read any other files.
