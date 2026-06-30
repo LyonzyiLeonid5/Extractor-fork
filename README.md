@@ -180,6 +180,21 @@ extractor path... [options]
 </tr>
 </table>
 
+### Plugin parameters
+
+| Parameter | Description |
+|---|---|
+| `--plugin-debug` | Show debug information |
+| `--plugin-load-all` | Load all plugins regardless of `CanRun` |
+| `--plugin-load=PluginName` | Load only specified plugin |
+| `--plugin-disable=PluginName` | Disable specified plugin |
+| `--plugin-dir=./plugins` | Plugin directory |
+| `--plugin-prefix=Prefix` | Load DLLs with prefix |
+| `--plugin-verbose` | Verbose plugin info |
+| `--plugin-save-output` | Save plugin output |
+| `--plugin-list` | List plugins |
+| `--plugin-ignore-exit` | Ignore `Environment.Exit` |
+
 
 ### Examples
 Normal extraction:
@@ -220,6 +235,16 @@ extractor "file1.scs" "file2.scs" "file3.scs" --deep --separate
 Alternatively:
 ```sh
 extractor "path\to\mod\directory" --all --deep --separate
+```
+
+### Plugin Examples
+
+```bash
+extractor.exe file.scs --deep --myplugin
+extractor.exe file.scs --deep --myplugin --plugin-debug
+extractor.exe file.scs --deep --plugin-load=MyPlugin
+extractor.exe file.scs --deep --plugin-load-all
+extractor.exe file.scs --deep --myplugin --plugin-ignore-exit
 ```
 
 
@@ -305,31 +330,6 @@ namespace Extractor.Deep
         }
     }
 }
-```
-
-### Plugin parameters
-
-| Parameter | Description |
-|---|---|
-| `--plugin-debug` | Show debug information |
-| `--plugin-load-all` | Load all plugins regardless of `CanRun` |
-| `--plugin-load=PluginName` | Load only specified plugin |
-| `--plugin-disable=PluginName` | Disable specified plugin |
-| `--plugin-dir=./plugins` | Plugin directory |
-| `--plugin-prefix=Prefix` | Load DLLs with prefix |
-| `--plugin-verbose` | Verbose plugin info |
-| `--plugin-save-output` | Save plugin output |
-| `--plugin-list` | List plugins |
-| `--plugin-ignore-exit` | Ignore `Environment.Exit` |
-
-### Examples
-
-```bash
-extractor.exe file.scs --deep --myplugin
-extractor.exe file.scs --deep --myplugin --plugin-debug
-extractor.exe file.scs --deep --plugin-load=MyPlugin
-extractor.exe file.scs --deep --plugin-load-all
-extractor.exe file.scs --deep --myplugin --plugin-ignore-exit
 ```
 
 ### Notes
