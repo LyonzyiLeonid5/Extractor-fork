@@ -13,7 +13,7 @@ A cross-platform .scs extractor for both HashFS and ZIP.
 
 
 ## Build
-For x64 Windows and Linux, a standalone executable is available on the Releases page. On other platforms, install the
+For x64 Windows, a standalone executable is available on the Releases page. On other platforms, install the
 .NET 10 SDK and run the following:
 
 ```sh
@@ -431,4 +431,4 @@ namespace Extractor.Deep
 - There's no need to change or add to the standard extractor parameters. Improve yours.
 - Keep in mind that you will lose a lot if you don't use --deep.
 - Before you begin, please review the extractor code and the structure of what you're about to process. This will prevent you from making silly mistakes and save you time.
-- Compile your plugins only into DLL files or their Linux equivalent. The program won't read any other files.
+- Compile your plugins only into DLL files. The program won't read any other files.
