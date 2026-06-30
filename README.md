@@ -181,7 +181,7 @@ extractor path... [options]
 </tr>
 </table>
 
-### Plugin parameters
+### Plugin options
 
 | Parameter | Description |
 |---|---|
@@ -195,6 +195,64 @@ extractor path... [options]
 | `--plugin-save-output` | Save plugin output |
 | `--plugin-list` | List plugins |
 | `--plugin-ignore-exit` | Ignore `Environment.Exit` |
+<table>
+<thead>
+  <tr>
+    <td><b>Long&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</b></td>
+    <td><b>Description</b></td>
+  </tr>
+</thead>
+<tr>
+  <td></td>
+  <td><code>--plugin-debug</code></td>
+  <td>Show debug information</td>
+</tr>
+<tr>
+  <td></td>
+  <td><code>--plugin-load-all</code></td>
+  <td>Load all available plugins regardless of their CanRun result.</td>
+</tr>
+<tr>
+  <td></td>
+  <td><code>--plugin-load=VALUE</code></td>
+  <td>Load only specific plugins by name(comma-separated). Example: --plugin-load=MyPlugin, AnotherPlugin</td>
+</tr>
+<tr>
+  <td></td>
+  <td><code>--plugin-disable=VALUE</code></td>
+  <td>Disable specific plugins by name (comma-separated).</td>
+</tr>
+<tr>
+  <td></td>
+  <td><code>--plugin-dir=VALUE</code></td>
+  <td>Load plugins from a specific directory instead of the default.</td>
+</tr>
+<tr>
+  <td></td>
+  <td><code>--plugin-prefix=VALUE</code></td>
+  <td>Load only plugins whose DLL filename starts with the given prefix.</td>
+</tr>
+<tr>
+  <td></td>
+  <td><code>--plugin-verbose</code></td>
+  <td>Show detailed information about loaded plugins.</td>
+</tr>
+<tr>
+  <td></td>
+  <td><code>--plugin-save-output</code></td>
+  <td>Save plugin output to separate files in the plugin directory.</td>
+</tr>
+<tr>
+  <td></td>
+  <td><code>--plugin-list</code></td>
+  <td>List all available plugins and exit. Use with --plugin-verbose for more details.</td>
+</tr>
+<tr>
+  <td></td>
+  <td><code>--plugin-ignore-exit</code></td>
+  <td>Ignore Environment.Exit calls from plugins.</td>
+</tr>
+</table>
 
 
 ### Examples
@@ -240,12 +298,29 @@ extractor "path\to\mod\directory" --all --deep --separate
 
 ### Plugin Examples
 
+Just run your plugin:
 ```sh
 extractor.exe file.scs --deep --myplugin
+```
+View information about the plugin's work:
+```sh
 extractor.exe file.scs --deep --myplugin --plugin-debug
+```
+Force loading your plugin:
+```sh
 extractor.exe file.scs --deep --plugin-load=MyPlugin
+```
+Force load all plugins from a folder:
+```sh
 extractor.exe file.scs --deep --plugin-load-all
-extractor.exe file.scs --deep --myplugin --plugin-ignore-exit
+```
+Force loading all plugins from the folder that start with My:
+```sh
+extractor.exe file.scs --deep --plugin-load-all --plugin-prefix=My
+```
+Force loading of your and other plugins with mandatory execution of each:
+```sh
+extractor.exe file.scs --deep --myplugin --plugin-load=OtherPlugin --plugin-ignore-exit
 ```
 
 
