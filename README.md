@@ -221,3 +221,122 @@ Alternatively:
 ```sh
 extractor "path\to\mod\directory" --all --deep --separate
 ```
+
+
+## Plugin Development
+
+### Plugin structure
+
+```csharp
+using System;
+using System.Linq;
+using System.IO;
+using Extractor;
+using TruckLib;
+using TruckLib.HashFs;
+using TruckLib.Sii;
+
+namespace Extractor.Deep
+{
+    public class PluginName
+    {
+        public static bool CanRun(string[] args)
+        {
+            if (!args.Any(a => a.Equals("--deep", StringComparison.OrdinalIgnoreCase)))
+            {
+                Console.WriteLine("Requires --deep launch parameter!");
+                Console.WriteLine("If you wrote it, it means the archive is either a regular ZIP or a regular HashFs, which can be unpacked in the usual way.");
+                return false;
+            }
+            return args.Any(a => a.Equals("--manifest", StringComparison.OrdinalIgnoreCase) || a.Equals("-manifest", StringComparison.OrdinalIgnoreCase));
+        }
+
+        public static bool RunAfterExtraction() => false;
+        public static bool IgnoreExit() => false;
+
+        public static void Run(string[] args, Extractor extractor)
+        {
+            Environment.Exit(0);
+        }
+    }
+}
+```
+
+### Minimal plugin
+
+```csharp
+using System;
+using System.Linq;
+using Extractor;
+using TruckLib.HashFs;
+
+namespace Extractor.Deep
+{
+    public class MyPlugin
+    {
+        public static bool CanRun(string[] args)
+        {
+            if (!args.Any(a => a.Equals("--deep", StringComparison.OrdinalIgnoreCase)))
+            {
+                Console.WriteLine("Requires --deep launch parameter!");
+                return false;
+            }
+
+            return args.Any(a => a.Equals("--myplugin", StringComparison.OrdinalIgnoreCase));
+        }
+
+        public static void Run(string[] args, Extractor extractor)
+        {
+            Console.WriteLine("MyPlugin started!");
+
+            if (extractor is HashFsDeepExtractor deep)
+            {
+                Console.WriteLine($"Archive: {extractor.ScsPath}");
+                Console.WriteLine($"Entries: {deep.Reader.Entries.Count}");
+            }
+            else
+            {
+                Console.WriteLine("This plugin requires --deep mode!");
+                Environment.Exit(0);
+                return;
+            }
+
+            Console.WriteLine("MyPlugin finished!");
+        }
+    }
+}
+```
+
+### Plugin parameters
+
+| Parameter | Description |
+|---|---|
+| `--plugin-debug` | Show debug information |
+| `--plugin-load-all` | Load all plugins regardless of `CanRun` |
+| `--plugin-load=PluginName` | Load only specified plugin |
+| `--plugin-disable=PluginName` | Disable specified plugin |
+| `--plugin-dir=./plugins` | Plugin directory |
+| `--plugin-prefix=Prefix` | Load DLLs with prefix |
+| `--plugin-verbose` | Verbose plugin info |
+| `--plugin-save-output` | Save plugin output |
+| `--plugin-list` | List plugins |
+| `--plugin-ignore-exit` | Ignore `Environment.Exit` |
+
+### Examples
+
+```bash
+extractor.exe file.scs --deep --myplugin
+extractor.exe file.scs --deep --myplugin --plugin-debug
+extractor.exe file.scs --deep --plugin-load=MyPlugin
+extractor.exe file.scs --deep --plugin-load-all
+extractor.exe file.scs --deep --myplugin --plugin-ignore-exit
+```
+
+### Notes
+
+- Use `using Extractor;`
+- Recommended namespace: `Extractor.Deep`
+- `CanRun` and `Run` are required.
+- `RunAfterExtraction` and `IgnoreExit` are optional.
+- Check `--deep`.
+- Use `extractor is HashFsDeepExtractor`.
