@@ -1,4 +1,4 @@
-﻿﻿using Extractor.Deep;
+﻿using Extractor.Deep;
 using Extractor.Zip;
 using Serilog;
 using System;
@@ -7,22 +7,40 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using TruckLib.HashFs;
+using Extractor.Plugins;
 using static Extractor.PathUtils;
 
 namespace Extractor
 {
     class Program
     {
+        private static PluginManager pluginManager;
         private static bool launchedByExplorer = false;
         private static Options opt;
         private static ILogger logger;
 
         public static int Main(string[] args)
         {
+            if (args.Length > 0 && args[0] == "--plugin-runner")
+            {
+                PluginManager.RunPluginFromCommandLine(args);
+                return 0;
+            }
+
+            if (OperatingSystem.IsWindows())
+            {
+                launchedByExplorer = !Debugger.IsAttached &&
+                    Path.TrimEndingDirectorySeparator(Path.GetDirectoryName(Console.Title)) ==
+                    Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory);
+            }
+
+            Console.OutputEncoding = Encoding.UTF8;
+
+            opt = new Options();
+            opt.Parse(args);
             if (OperatingSystem.IsWindows())
             {
                 // Detect whether the extractor was launched by Explorer to pause at the end
@@ -46,6 +64,7 @@ namespace Extractor
             }
 
             ConfigureLogger(args);
+            pluginManager = new PluginManager(opt, logger);
 
             var exitCode = ValidateOptions();
             if (exitCode is null)
@@ -131,7 +150,7 @@ namespace Extractor
                 { "tree", opt.PrintTree },
             };
             var combinations = modeSwitches.SelectMany(
-                (x, i) => modeSwitches.Skip(i + 1), 
+                (x, i) => modeSwitches.Skip(i + 1),
                 (x, y) => (X: x, Y: y)
             );
             foreach (var (X, Y) in combinations)
@@ -148,166 +167,127 @@ namespace Extractor
         }
 
         private static ExitCode Run()
+{
+    var plugins = pluginManager.LoadPlugins();
+
+    if (opt.PluginVerbose || opt.PluginDebug)
+    {
+        logger.Information("Loaded {Count} plugins: {Plugins}",
+            plugins.Count,
+            string.Join(", ", plugins.Select(p => p.Name)));
+    }
+
+    var scsPaths = GetScsPathsFromArgs();
+    if (scsPaths.Length == 0)
+    {
+        Console.Error.WriteLine("No .scs files were found.");
+        logger.Error("No .scs files were found.");
+        return ExitCode.NoInput;
+    }
+
+    if (opt.PluginDebug)
+    {
+        pluginManager.SaveDebugInfo();
+    }
+
+    if (opt.UseDeepExtractor && scsPaths.Length > 1)
+    {
+        return DoMultiDeepExtraction(scsPaths);
+    }
+
+    List<ExtractionResult> results = new(scsPaths.Length);
+    foreach (var scsPath in scsPaths)
+    {
+        logger.Information("Constructing extractor for \"{Path}\"", scsPath);
+        Extractor extractor;
+        try
         {
-            var plugins = LoadPlugins();
-            var scsPaths = GetScsPathsFromArgs();
-            if (scsPaths.Length == 0)
+            extractor = CreateExtractor(scsPath);
+            var pluginsToRun = pluginManager.FilterPlugins(plugins);
+
+            if (opt.PluginDebug)
             {
-                Console.Error.WriteLine("No .scs files were found.");
-                logger.Error("No .scs files were found.");
-                return ExitCode.NoInput;
+                Console.WriteLine("=== Running plugins BEFORE extraction ===");
             }
-
-            if (opt.UseDeepExtractor && scsPaths.Length > 1)
+            pluginManager.RunPlugins(pluginsToRun, opt.RawArgs, extractor, false);
+        }
+        catch (FileNotFoundException)
+        {
+            results.Add(ExtractionResult.NotFound);
+            continue;
+        }
+        catch (InvalidDataException)
+        {
+            results.Add(ExtractionResult.FailedToOpen);
+            continue;
+        }
+        catch (Exception ex)
+        {
+            if (opt.PluginDebug)
             {
-                return DoMultiDeepExtraction(scsPaths);
+                Console.WriteLine($"Plugin error: {ex.Message}");
+                logger.Error(ex, "Plugin error");
             }
-
-            List<ExtractionResult> results = new(scsPaths.Length);
-            foreach (var scsPath in scsPaths)
-            {
-                logger.Information("Constructing extractor for \"{Path}\"", scsPath);
-                Extractor extractor;
-                try
-                {
-                    extractor = CreateExtractor(scsPath);
-                    RunPlugins(plugins, opt.RawArgs, extractor, false);
-                }
-                catch (FileNotFoundException)
-                {
-                    results.Add(ExtractionResult.NotFound);
-                    continue;
-                }
-                catch (InvalidDataException)
-                {
-                    results.Add(ExtractionResult.FailedToOpen);
-                    continue;
-                }
-                catch (Exception)
-                {
-                    results.Add(ExtractionResult.FailedToOpen);
-                    continue;
-                }
-
-                if (opt.ListEntries)
-                {
-                    if (extractor is HashFsExtractor hEx)
-                    {
-                        ListEntries(hEx);
-                        results.Add(ExtractionResult.Success);
-                    }
-                    else
-                    {
-                        Console.Error.WriteLine("--list-entries can only be used with HashFS archives.");
-                        logger.Error("--list-entries can only be used with HashFS archives.");
-                        results.Add(ExtractionResult.IncompatibleOptions);
-                    }
-                }
-                else if (opt.ListPaths)
-                {
-                    extractor.PrintPaths(opt.ListAll);
-                    results.Add(ExtractionResult.Success);
-                }
-                else if (opt.PrintTree)
-                {
-                    var trees = extractor.GetDirectoryTree();
-                    var scsName = Path.GetFileName(extractor.ScsPath);
-                    Tree.TreePrinter.Print(trees, scsName);
-                    results.Add(ExtractionResult.Success);
-                }
-                else
-                {
-                    try
-                    {
-                        extractor.Extract(GetDestination(scsPath));
-                        RunPlugins(plugins, opt.RawArgs, extractor, true);
-                        results.Add(ExtractionResult.Success);
-                    }
-                    catch (RootMissingException)
-                    {
-                        ConsoleUtils.PrintRootMissingError();
-                        results.Add(ExtractionResult.RootMissing);
-                    }
-                    catch (RootEmptyException)
-                    {
-                        ConsoleUtils.PrintRootEmptyError();
-                        results.Add(ExtractionResult.RootEmpty);
-                    }
-                    extractor.PrintExtractionResult();
-                }
-            }
-
-            return DetermineExitCode(results);
+            results.Add(ExtractionResult.FailedToOpen);
+            continue;
         }
 
-        private static List<Type> LoadPlugins()
+        if (opt.ListEntries)
         {
-            List<Type> plugins = new();
-
-            string baseDir = Path.GetDirectoryName(Environment.ProcessPath);
-            var dlls = Directory.GetFiles(baseDir, "*.dll");
-
-            foreach (var dll in dlls)
+            if (extractor is HashFsExtractor hEx)
             {
-                try
-                {
-                    var assembly = Assembly.LoadFrom(dll);
-
-                    foreach (var type in assembly.GetTypes())
-                    {
-                        var canRun = type.GetMethod("CanRun", BindingFlags.Public | BindingFlags.Static);
-                        var run = type.GetMethod("Run", BindingFlags.Public | BindingFlags.Static);
-
-                        if (canRun != null && run != null)
-                        {
-                            plugins.Add(type);
-                        }
-                    }
-                }
-                catch
-                {
-                }
+                ListEntries(hEx);
+                results.Add(ExtractionResult.Success);
             }
-
-            return plugins;
-        }
-
-        private static void RunPlugins(List<Type> plugins, string[] args, Extractor extractor, bool afterExtraction = false)
-        {
-            foreach (var plugin in plugins)
+            else
             {
-                try
-                {
-                    var canRun = plugin.GetMethod("CanRun");
-                    var run = plugin.GetMethod("Run");
-
-                    if (canRun == null || run == null)
-                        continue;
-
-                    bool shouldRun = (bool)canRun.Invoke(null, new object[] { args });
-
-                    if (!shouldRun)
-                        continue;
-
-                    bool wantsAfterExtraction = false;
-
-                    var afterMethod = plugin.GetMethod("RunAfterExtraction");
-
-                    if (afterMethod != null)
-                    {
-                        wantsAfterExtraction = (bool)afterMethod.Invoke(null, null);
-                    }
-
-                    if (afterExtraction != wantsAfterExtraction)
-                        continue;
-
-                    run.Invoke(null, new object[] { args, extractor });
-                }
-                catch
-                {
-                }
+                Console.Error.WriteLine("--list-entries can only be used with HashFS archives.");
+                logger.Error("--list-entries can only be used with HashFS archives.");
+                results.Add(ExtractionResult.IncompatibleOptions);
             }
         }
+        else if (opt.ListPaths)
+        {
+            extractor.PrintPaths(opt.ListAll);
+            results.Add(ExtractionResult.Success);
+        }
+        else if (opt.PrintTree)
+        {
+            var trees = extractor.GetDirectoryTree();
+            var scsName = Path.GetFileName(extractor.ScsPath);
+            Tree.TreePrinter.Print(trees, scsName);
+            results.Add(ExtractionResult.Success);
+        }
+        else
+        {
+            try
+            {
+                extractor.Extract(GetDestination(scsPath));
+                results.Add(ExtractionResult.Success);
+            }
+            catch (RootMissingException)
+            {
+                ConsoleUtils.PrintRootMissingError();
+                results.Add(ExtractionResult.RootMissing);
+            }
+            catch (RootEmptyException)
+            {
+                ConsoleUtils.PrintRootEmptyError();
+                results.Add(ExtractionResult.RootEmpty);
+            }
+            extractor.PrintExtractionResult();
+        }
+
+        var pluginsAfter = pluginManager.FilterPlugins(plugins);
+        if (opt.PluginDebug)
+        {
+            Console.WriteLine("=== Running plugins AFTER extraction ===");
+        }
+        pluginManager.RunPlugins(pluginsAfter, opt.RawArgs, extractor, true);
+    }
+
+    return DetermineExitCode(results);
+}
 
         private static ExitCode DetermineExitCode(List<ExtractionResult> results)
         {

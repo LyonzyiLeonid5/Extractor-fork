@@ -1,4 +1,4 @@
-﻿﻿using Mono.Options;
+﻿using Mono.Options;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -136,11 +136,68 @@ namespace Extractor
         /// </summary>
         public bool UseRawExtractor { get; set; } = false;
 
+        // ============ Properties For Plugins ============
+
+        /// <summary>
+        /// Загружать все доступные плагины независимо от их CanRun.
+        /// </summary>
+        public bool LoadAllPlugins { get; set; } = false;
+
+        /// <summary>
+        /// Список плагинов для загрузки вручную (игнорирует CanRun).
+        /// </summary>
+        public List<string> PluginLoadList { get; set; } = new();
+
+        /// <summary>
+        /// Список плагинов для отключения.
+        /// </summary>
+        public List<string> PluginDisableList { get; set; } = new();
+
+        /// <summary>
+        /// Отображать debug-информацию от плагинов.
+        /// </summary>
+        public bool PluginDebug { get; set; } = false;
+
+        /// <summary>
+        /// Показывать детальную информацию о плагинах при загрузке.
+        /// </summary>
+        public bool PluginVerbose { get; set; } = false;
+
+        /// <summary>
+        /// Загружать плагины только из указанной директории.
+        /// </summary>
+        public string PluginDirectory { get; set; } = null;
+
+        /// <summary>
+        /// Загружать плагины с указанным префиксом в имени файла.
+        /// </summary>
+        public string PluginPrefix { get; set; } = null;
+
+        /// <summary>
+        /// Выполнять только плагины, не выполняя основную экстракцию.
+        /// </summary>
+        public bool PluginsOnly { get; set; } = false;
+
+        /// <summary>
+        /// Сохранять вывод плагинов в отдельные файлы.
+        /// </summary>
+        public bool PluginSaveOutput { get; set; } = false;
+
+        /// <summary>
+        /// Instead of extracting, list all available plugins and exit.
+        /// </summary>
+        public bool PrintPluginList { get; set; } = false;
+
+        /// <summary>
+        /// Игнорировать Environment.Exit в плагинах.
+        /// </summary>
+        public bool PluginIgnoreExit { get; set; } = false;
+
         public Options()
         {
             OptionSet = new OptionSet()
             {
-                 { "additional=",
+                { "additional=",
                     "[HashFS] When using --deep, specifies additional start paths to search. " +
                     "Expects a text file containing paths to extract, separated by line breaks.",
                     x => { AdditionalStartPaths = LoadPathsFromFile(x); } },
@@ -154,7 +211,7 @@ namespace Extractor
                 { "d=|dest=",
                     $"The output directory.\nDefault: \"{Destination}\"",
                     x => { Destination = x; } },
-                 { "dry-run",
+                { "dry-run",
                     $"Don't write anything to disk.",
                     x => { DryRun = true; } },
                 { "f=|filter=",
@@ -174,14 +231,14 @@ namespace Extractor
                 { "log:",
                     "Enables logging. If no path is provided, the log will be written to " +
                     $"\"{LogFile}\".",
-                    x => 
-                    { 
-                        Logging = true; 
-                        if (!string.IsNullOrWhiteSpace(x)) 
-                        { 
-                            LogFile = x; 
-                        } 
-                    } 
+                    x =>
+                    {
+                        Logging = true;
+                        if (!string.IsNullOrWhiteSpace(x))
+                        {
+                            LogFile = x;
+                        }
+                    }
                 },
                 { "no-update",
                     $"Don't update references to paths that had to be renamed during extraction.",
@@ -193,7 +250,7 @@ namespace Extractor
                     "-p=/def,/map\n" +
                     "-p=/def/world/road.sii",
                     x => { StartPaths = x.Split(","); } },
-                 { "P=|paths=",
+                { "P=|paths=",
                     "Same as --partial, but expects a text file containing paths to extract, " +
                     "separated by line breaks.",
                     x => { StartPaths = LoadPathsFromFile(x); } },
@@ -223,6 +280,41 @@ namespace Extractor
                 { "?|h|help",
                     $"Prints this message and exits.",
                     x => { PrintHelp = true; } },
+
+                // ============ Options For Plugins ============
+                { "plugin-debug",
+                    "[Plugins]Show debug information from plugins.",
+                    x => { PluginDebug = true; } },
+                { "plugin-load-all",
+                    "[Plugins]Load all available plugins regardless of their CanRun result.",
+                    x => { LoadAllPlugins = true; } },
+                { "plugin-load=",
+                    "[Plugins]Load only specific plugins by name (comma-separated). Example: --plugin-load=MyPlugin,AnotherPlugin",
+                    x => { PluginLoadList = x.Split(",", StringSplitOptions.RemoveEmptyEntries).Select(p => p.Trim()).ToList(); } },
+                { "plugin-disable=",
+                    "[Plugins]Disable specific plugins by name (comma-separated).",
+                    x => { PluginDisableList = x.Split(",", StringSplitOptions.RemoveEmptyEntries).Select(p => p.Trim()).ToList(); } },
+                { "plugin-dir=",
+                    "[Plugins]Load plugins from a specific directory instead of the default.",
+                    x => { PluginDirectory = x; } },
+                { "plugin-prefix=",
+                    "[Plugins]Load only plugins whose DLL filename starts with the given prefix.",
+                    x => { PluginPrefix = x; } },
+                { "plugin-only",
+                    "[Plugins]Run only plugins, skip extraction. Useful when you want to process files without extracting them.",
+                    x => { PluginsOnly = true; } },
+                { "plugin-verbose",
+                    "[Plugins]Show detailed information about loaded plugins.",
+                    x => { PluginVerbose = true; } },
+                { "plugin-save-output",
+                    "[Plugins]Save plugin output to separate files in the plugin directory.",
+                    x => { PluginSaveOutput = true; } },
+                { "plugin-list",
+                    "[Plugins]List all available plugins and exit. Use with --plugin-verbose for more details.",
+                    x => { PrintPluginList = true; } },
+                { "plugin-ignore-exit",
+                    "[Plugins]Ignore Environment.Exit calls from plugins.",
+                    x => { PluginIgnoreExit = true; } },
             };
         }
 
@@ -268,14 +360,14 @@ namespace Extractor
             List<Regex> filters = new(patterns.Length);
             foreach (var pattern in patterns)
             {
-                var regex = IsRegexPattern(pattern) 
-                    ? new Regex(pattern[2..^1]) 
+                var regex = IsRegexPattern(pattern)
+                    ? new Regex(pattern[2..^1])
                     : TextUtils.WildcardStringToRegex(pattern);
                 filters.Add(regex);
             }
             return filters;
 
-            static bool IsRegexPattern(string pattern) => 
+            static bool IsRegexPattern(string pattern) =>
                 pattern.Length >= 3 && pattern.StartsWith("r/") && pattern.EndsWith('/');
         }
 
