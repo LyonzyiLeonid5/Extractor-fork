@@ -478,8 +478,8 @@ namespace Extractor.Deep // or Extractor namespace
 3. File - the target class file name
 4. Method - original method to be replaced
 5. PatchMethod - your custom method name
-6. Use --plugin-bypass or --plugin-load to activate bypass plugins
-7. Patcher.ApplyPatch() applies runtime method patching
+6. Use ```--plugin-bypass``` or ```--plugin-load``` to activate bypass plugins
+7. ```Patcher.ApplyPatch()``` applies runtime method patching
 
 ### Minimal plugin
 
