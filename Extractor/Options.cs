@@ -144,6 +144,11 @@ namespace Extractor
         public bool LoadAllPlugins { get; set; } = false;
 
         /// <summary>
+        /// Загружать плагины, нейтрализующие ошибки.
+        /// </summary>
+        public bool LoadBypassPlugins { get; set; } = false;
+
+        /// <summary>
         /// Список плагинов для загрузки вручную (игнорирует CanRun).
         /// </summary>
         public List<string> PluginLoadList { get; set; } = new();
@@ -288,6 +293,9 @@ namespace Extractor
                 { "plugin-load-all",
                     "[Plugins]Load all available plugins regardless of their CanRun result.",
                     x => { LoadAllPlugins = true; } },
+                { "plugin-bypass",
+                    "[Plugins]Launches plugins that neutralize errors.",
+                    x => { LoadBypassPlugins = true; } },
                 { "plugin-load=",
                     "[Plugins]Load only specific plugins by name (comma-separated). Example: --plugin-load=MyPlugin,AnotherPlugin",
                     x => { PluginLoadList = x.Split(",", StringSplitOptions.RemoveEmptyEntries).Select(p => p.Trim()).ToList(); } },
