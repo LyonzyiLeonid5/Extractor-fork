@@ -61,6 +61,11 @@ namespace Extractor
         /// The value passed to <c>--salt</c> is not a valid ushort.
         /// </summary>
         InvalidSalt = 9,
+
+        /// <summary>
+        /// The plugin directory is not able to find.
+        /// </summary>
+        PluginDirectoryNotFound = 10,
     }
 
     public enum ExtractionResult

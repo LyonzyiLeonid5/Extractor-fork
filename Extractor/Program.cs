@@ -1,4 +1,4 @@
-﻿﻿using Extractor.Deep;
+﻿using Extractor.Deep;
 using Extractor.Zip;
 using Serilog;
 using System;
@@ -7,22 +7,40 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using TruckLib.HashFs;
+using Extractor.Plugins;
 using static Extractor.PathUtils;
 
 namespace Extractor
 {
     class Program
     {
+        private static PluginManager pluginManager;
         private static bool launchedByExplorer = false;
         private static Options opt;
         private static ILogger logger;
 
         public static int Main(string[] args)
         {
+            if (args.Length > 0 && args[0] == "--plugin-runner")
+            {
+                PluginManager.RunPluginFromCommandLine(args);
+                return 0;
+            }
+
+            if (OperatingSystem.IsWindows())
+            {
+                launchedByExplorer = !Debugger.IsAttached &&
+                    Path.TrimEndingDirectorySeparator(Path.GetDirectoryName(Console.Title)) ==
+                    Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory);
+            }
+
+            Console.OutputEncoding = Encoding.UTF8;
+
+            opt = new Options();
+            opt.Parse(args);
             if (OperatingSystem.IsWindows())
             {
                 // Detect whether the extractor was launched by Explorer to pause at the end
@@ -46,6 +64,8 @@ namespace Extractor
             }
 
             ConfigureLogger(args);
+            pluginManager = new PluginManager(opt, logger);
+            CatchDetector.Initialize(logger);
 
             var exitCode = ValidateOptions();
             if (exitCode is null)
@@ -54,28 +74,42 @@ namespace Extractor
             }
 
             logger.Information("Exiting with code {Code} ({CodeName})", (int)exitCode, exitCode.ToString());
+            foreach (var msg in LogManager.InMemorySink.AllMessages)
+            {
+                //Console.WriteLine($"Лог: {msg}");
+            }
             Log.CloseAndFlush();
             PauseIfNecessary();
             return (int)exitCode;
         }
+
+        private static StringBuilder logBuilder = new StringBuilder();
 
         private static void ConfigureLogger(string[] args)
         {
             if (opt.Logging)
             {
                 var loggerConfig = new LoggerConfiguration()
-                .MinimumLevel.Debug()
-                .Enrich.FromLogContext()
-                .Enrich.WithComputed("SourceContextName", "Substring(SourceContext, LastIndexOf(SourceContext, '.') + 1)")
-                .WriteTo.File(opt.LogFile, outputTemplate:
-                    "[{Timestamp:HH:mm:ss:ff} {Level:u3}] [{SourceContextName}] {Message:l}{NewLine}{Exception}");
+                    .MinimumLevel.Debug()
+                    .Enrich.FromLogContext()
+                    .Enrich.WithComputed("SourceContextName", "Substring(SourceContext, LastIndexOf(SourceContext, '.') + 1)")
+                    .WriteTo.File(opt.LogFile, outputTemplate:
+                        "[{Timestamp:HH:mm:ss:ff} {Level:u3}] [{SourceContextName}] {Message:l}{NewLine}{Exception}")
+                    .WriteTo.Sink(new LogManager.InMemorySink(logBuilder));
+
                 Log.Logger = loggerConfig.CreateLogger();
                 logger = Log.ForContext<Program>();
                 LogDebugInformation(args);
             }
             else
             {
+                var loggerConfig = new LoggerConfiguration()
+                    .MinimumLevel.Debug()
+                    .WriteTo.Sink(new LogManager.InMemorySink(logBuilder));
+
+                Log.Logger = loggerConfig.CreateLogger();
                 logger = Log.ForContext<Program>();
+                LogDebugInformation(args);
             }
         }
 
@@ -131,7 +165,7 @@ namespace Extractor
                 { "tree", opt.PrintTree },
             };
             var combinations = modeSwitches.SelectMany(
-                (x, i) => modeSwitches.Skip(i + 1), 
+                (x, i) => modeSwitches.Skip(i + 1),
                 (x, y) => (X: x, Y: y)
             );
             foreach (var (X, Y) in combinations)
@@ -149,13 +183,23 @@ namespace Extractor
 
         private static ExitCode Run()
         {
-            var plugins = LoadPlugins();
+            bool runnedBypass = false;
+            bool runnedBefore = false;
+            bool runnedAfter = false;
             var scsPaths = GetScsPathsFromArgs();
             if (scsPaths.Length == 0)
             {
                 Console.Error.WriteLine("No .scs files were found.");
                 logger.Error("No .scs files were found.");
                 return ExitCode.NoInput;
+            }
+
+            var allPlugins = pluginManager.plugins;
+
+            if (!runnedBypass)
+            {
+                runnedBypass = true;
+                pluginManager.RunErrorBypassPluginsIfNeeded(allPlugins, null);
             }
 
             if (opt.UseDeepExtractor && scsPaths.Length > 1)
@@ -167,11 +211,19 @@ namespace Extractor
             foreach (var scsPath in scsPaths)
             {
                 logger.Information("Constructing extractor for \"{Path}\"", scsPath);
-                Extractor extractor;
+                Extractor extractor = null;
+
                 try
                 {
                     extractor = CreateExtractor(scsPath);
-                    RunPlugins(plugins, opt.RawArgs, extractor, false);
+
+                    var beforePlugins = pluginManager.FilterPlugins(allPlugins);
+                    if (opt.PluginDebug && beforePlugins.Count > 0 && !runnedBefore)
+                    {
+                        runnedBefore = true;
+                        Console.WriteLine("=== Running plugins BEFORE extraction ===");
+                    }
+                    pluginManager.RunPlugins(beforePlugins, opt.RawArgs, extractor, false);
                 }
                 catch (FileNotFoundException)
                 {
@@ -183,8 +235,10 @@ namespace Extractor
                     results.Add(ExtractionResult.FailedToOpen);
                     continue;
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
+                    Console.Error.WriteLine($"Unable to open {scsPath}: {ex.Message}");
+                    logger.Error(ex, "Unable to create extractor for \"{Path}\"", scsPath);
                     results.Add(ExtractionResult.FailedToOpen);
                     continue;
                 }
@@ -217,96 +271,54 @@ namespace Extractor
                 }
                 else
                 {
-                    try
+                    if (PluginManager.IsExtractionBlocked())
                     {
-                        extractor.Extract(GetDestination(scsPath));
-                        RunPlugins(plugins, opt.RawArgs, extractor, true);
+                        Console.WriteLine("[Plugin-Only Mode] Skipping extraction (--plugin-only is active)");
+                        logger.Information("Skipping extraction because --plugin-only is active");
                         results.Add(ExtractionResult.Success);
                     }
-                    catch (RootMissingException)
+                    else
                     {
-                        ConsoleUtils.PrintRootMissingError();
-                        results.Add(ExtractionResult.RootMissing);
+                        try
+                        {
+                            extractor.Extract(GetDestination(scsPath));
+                            results.Add(ExtractionResult.Success);
+                        }
+                        catch (RootMissingException)
+                        {
+                            ConsoleUtils.PrintRootMissingError();
+                            results.Add(ExtractionResult.RootMissing);
+                        }
+                        catch (RootEmptyException)
+                        {
+                            ConsoleUtils.PrintRootEmptyError();
+                            results.Add(ExtractionResult.RootEmpty);
+                        }
+                        catch (Exception ex)
+                        {
+                            if (opt.PluginDebug)
+                            {
+                                Console.WriteLine($"Plugin error: {ex.Message}");
+                                logger.Error(ex, "Plugin error");
+                            }
+                            results.Add(ExtractionResult.FailedToOpen);
+                            continue;
+                        }
                     }
-                    catch (RootEmptyException)
-                    {
-                        ConsoleUtils.PrintRootEmptyError();
-                        results.Add(ExtractionResult.RootEmpty);
-                    }
+
                     extractor.PrintExtractionResult();
                 }
+
+                var afterPlugins = pluginManager.FilterPlugins(pluginManager.plugins);
+                if (opt.PluginDebug && !runnedAfter)
+                {
+                    runnedAfter = true;
+                    Console.WriteLine("=== Running plugins AFTER extraction ===");
+                }
+                pluginManager.RunPlugins(afterPlugins, opt.RawArgs, extractor, true);
             }
 
             return DetermineExitCode(results);
-        }
-
-        private static List<Type> LoadPlugins()
-        {
-            List<Type> plugins = new();
-
-            string baseDir = Path.GetDirectoryName(Environment.ProcessPath);
-            var dlls = Directory.GetFiles(baseDir, "*.dll");
-
-            foreach (var dll in dlls)
-            {
-                try
-                {
-                    var assembly = Assembly.LoadFrom(dll);
-
-                    foreach (var type in assembly.GetTypes())
-                    {
-                        var canRun = type.GetMethod("CanRun", BindingFlags.Public | BindingFlags.Static);
-                        var run = type.GetMethod("Run", BindingFlags.Public | BindingFlags.Static);
-
-                        if (canRun != null && run != null)
-                        {
-                            plugins.Add(type);
-                        }
-                    }
-                }
-                catch
-                {
-                }
-            }
-
-            return plugins;
-        }
-
-        private static void RunPlugins(List<Type> plugins, string[] args, Extractor extractor, bool afterExtraction = false)
-        {
-            foreach (var plugin in plugins)
-            {
-                try
-                {
-                    var canRun = plugin.GetMethod("CanRun");
-                    var run = plugin.GetMethod("Run");
-
-                    if (canRun == null || run == null)
-                        continue;
-
-                    bool shouldRun = (bool)canRun.Invoke(null, new object[] { args });
-
-                    if (!shouldRun)
-                        continue;
-
-                    bool wantsAfterExtraction = false;
-
-                    var afterMethod = plugin.GetMethod("RunAfterExtraction");
-
-                    if (afterMethod != null)
-                    {
-                        wantsAfterExtraction = (bool)afterMethod.Invoke(null, null);
-                    }
-
-                    if (afterExtraction != wantsAfterExtraction)
-                        continue;
-
-                    run.Invoke(null, new object[] { args, extractor });
-                }
-                catch
-                {
-                }
-            }
         }
 
         private static ExitCode DetermineExitCode(List<ExtractionResult> results)
@@ -511,7 +523,12 @@ namespace Extractor
                 }
                 else
                 {
-                    if (extractor is HashFsDeepExtractor deep)
+                    if (PluginManager.IsExtractionBlocked())
+                    {
+                        Console.WriteLine("[Plugin-Only Mode] Skipping extraction (--plugin-only is active)");
+                        logger.Information("Skipping extraction because --plugin-only is active");
+                    }
+                    else if (extractor is HashFsDeepExtractor deep)
                     {
                         deep.Extract(existing.ToArray(), GetDestination(extractor.ScsPath), true);
                     }

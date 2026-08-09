@@ -10,6 +10,7 @@ A cross-platform .scs extractor for both HashFS and ZIP.
 * Built-in path-finding mode for HashFS archives without directory listings
 * Automatic conversion of 3nK-encoded and encrypted SII files
 * Reading and executing DLL files
+* Can bypass extractor errors via plugins
 
 
 ## Build
@@ -186,7 +187,7 @@ extractor path... [options]
 <table>
 <thead>
   <tr>
-    <td><b>Long&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</b></td>
+    <td><b>Long&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</b></td>
     <td><b>Description</b></td>
   </tr>
 </thead>
@@ -229,6 +230,10 @@ extractor path... [options]
 <tr>
   <td><code>--plugin-ignore-exit</code></td>
   <td>Ignore Environment.Exit calls from plugins.</td>
+</tr>
+<tr>
+  <td><code>--plugin-bypass</code></td>
+  <td>Calls plugins that bypass extractor errors.</td>
 </tr>
 </table>
 
@@ -288,6 +293,10 @@ Force loading your plugin:
 ```sh
 extractor.exe "file.scs" --deep --plugin-load=MyPlugin
 ```
+Run plugins that bypass errors:
+```sh
+extractor.exe "file.scs" --deep --plugin-bypass
+```
 Force load all plugins from a folder:
 ```sh
 extractor.exe "file.scs" --deep --plugin-load-all
@@ -312,6 +321,7 @@ extractor.exe "file.scs" --deep --myplugin --plugin-load=OtherPlugin --plugin-ig
 
   <ItemGroup>
     <ProjectReference Include="..\Extractor\Extractor.csproj" /> <!--REQUIRED REFERENCE!!!-->
+                             <!--Specify the path to the downloaded .csproj file from the source code of this program.-->
   </ItemGroup>
 
   <PropertyGroup>
@@ -324,13 +334,14 @@ extractor.exe "file.scs" --deep --myplugin --plugin-load=OtherPlugin --plugin-ig
 </Project>
 ```
 
-### Plugin structure
+### Default Plugin structure
 
 ```csharp
 using System; //<--- REQUIRED
 using System.Linq; //<--- Recommended
 using System.IO; //<--- Recommended
 using Extractor; //<--- REQUIRED
+using Serilog; //<--- Recommended
 using TruckLib; //<--- Recommended
 using TruckLib.HashFs; //<--- Recommended
 using TruckLib.Sii; //<--- Recommended
@@ -348,7 +359,7 @@ namespace Extractor.Deep //namespace Extractor is REQUIRED, but I highly recomme
         public static bool RunAfterExtraction(){return true;} //<--- Runs the plugin after the extractor actions.
         public static bool IgnoreExit(){return true;} //<--- Ignores Enviroment.Exit(0). Allows the plugin to run in any case.
 
-        public static void Run(string[] args, Extractor extractor) //<--- Required MAIN Plugin logic method
+        public static void Run(string[] args, Extractor extractor, ILogger logger) //<--- Required MAIN Plugin logic method
         {
           //If you use the Extractor.Deep namespace, you should be aware that missing the --deep parameter may cause the code to behave incorrectly.
           if (!args.Any(a => a.Equals("--deep", StringComparison.OrdinalIgnoreCase)))
@@ -369,6 +380,106 @@ namespace Extractor.Deep //namespace Extractor is REQUIRED, but I highly recomme
     }
 }
 ```
+
+### Error Bypass Plugin Structure
+
+```csharp
+// WARNING: Its very hard. Highly Not Recommended.
+using System;
+using System.Linq;
+using System.Reflection;
+using Extractor;
+using TruckLib.HashFs;
+using Serilog;
+
+namespace Extractor.Deep // or Extractor namespace
+{
+    public class YourPluginName
+    {
+        // REQUIRED: Determines if the plugin should be loaded
+        public static bool CanRun(string[] args)
+        {
+            // Your conditions for plugin activation
+            return args.Any(a => a.Equals("--yourplugin", StringComparison.OrdinalIgnoreCase));
+        }
+
+        // OPTIONAL: If true, runs after extraction completes
+        public static bool RunAfterExtraction() => false;
+
+        // OPTIONAL: If true, ignores Environment.Exit calls
+        public static bool IgnoreExit() => true;
+
+        // REQUIRED FOR ERROR BYPASS: Returns bypass criteria
+        public static object ErrorBypass()
+        {
+            return new
+            {
+                // Required for automatic patching
+                Libraries = new[] { "TruckLib.HashFs" },
+                // Target file/class to patch
+                File = "HashFsV2Reader",
+                // Original method to replace
+                Method = "OriginalMethod",
+                // Your patch method name
+                PatchMethod = "PatchedOriginalMethod"
+            };
+        }
+
+        // REQUIRED: Main plugin logic
+        public static void Run(string[] args, Extractor extractor, ILogger logger)
+        {
+            var _logger = logger.ForContext("SourceContext", "YourPluginName");
+
+            // Initialize your patch
+            YourPluginPatch.Logger = _logger;
+            YourPluginPatch.Initialize();
+
+            // Apply the patch
+            Patcher.ApplyPatch(
+                pluginName: "YourPluginName",
+                targetType: typeof(FileForPatching),
+                methodName: "ParseEntries",
+                patchClass: typeof(YourPluginPatch),
+                patchMethodName: "PatchedParseEntries",
+                methodBindingFlags: BindingFlags.NonPublic | BindingFlags.Instance
+            );
+        }
+    }
+
+    public static class YourPluginPatch
+    {
+        public static ILogger? Logger { get; set; }
+
+        public static void Initialize()
+        {
+            // Setup any required reflection or delegates
+            Logger?.Debug("Initializing plugin...");
+        }
+
+        // Your patched method (must match the original signature)
+        public static void PatchedParseEntries(HashFsV2Reader instance)
+        {
+            Logger?.Information("Patched method called!");
+
+            // Your custom logic here
+            // Can modify behavior, handle errors, etc.
+
+            // Optionally call original method:
+            // Patcher.CallOriginalMethod(instance);
+        }
+    }
+}
+```
+
+### Error Bypass Plugin Notes
+
+1. ErrorBypass() method is REQUIRED and returns criteria for automatic patching
+2. Libraries array - specify which libraries need patching
+3. File - the target class file name
+4. Method - original method to be replaced
+5. PatchMethod - your custom method name
+6. Use ```--plugin-bypass``` or ```--plugin-load``` to activate bypass plugins
+7. ```Patcher.ApplyPatch()``` applies runtime method patching
 
 ### Minimal plugin
 
@@ -432,3 +543,6 @@ namespace Extractor.Deep
 - Keep in mind that you will lose a lot if you don't use --deep.
 - Before you begin, please review the extractor code and the structure of what you're about to process. This will prevent you from making silly mistakes and save you time.
 - Compile your plugins only into DLL files. The program won't read any other files.
+
+## CREDITS:
+1. <a href="https://github.com/V4SS3UR/DetourUtility">DetourUtility</a> by V4SS3UR. Thanks for creating a cool and multifunctional utility.

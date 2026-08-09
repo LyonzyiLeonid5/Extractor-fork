@@ -1,4 +1,4 @@
-﻿﻿using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using TruckLib;
@@ -44,6 +44,11 @@ namespace Extractor
         /// The command line options set by the user.
         /// </summary>
         protected Options opt;
+
+        /// <summary>
+        /// Plugin metadata for tracking which plugins have been run.
+        /// </summary>
+        public List<string> RunPlugins { get; private set; } = [];
 
         public Extractor(string scsPath, Options opt) 
         { 
@@ -133,5 +138,19 @@ namespace Extractor
                 sw.WriteLine(file);
             }
         }
+
+        /// <summary>
+        /// Registers a plugin as having been run on this extractor.
+        /// </summary>
+        public void RegisterPluginRun(string pluginName)
+        {
+            if (!RunPlugins.Contains(pluginName))
+                RunPlugins.Add(pluginName);
+        }
+
+        /// <summary>
+        /// Gets the list of plugins that have been run on this extractor.
+        /// </summary>
+        public IReadOnlyList<string> GetRunPlugins() => RunPlugins;
     }
 }
